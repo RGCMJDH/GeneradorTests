@@ -58,6 +58,36 @@ describe('ocr', () => {
     expect(store.addDocument({ subjectId: s.id, title: 'sonda', sourceType: 'text' }).id).toBe(1)
   }, SLOW)
 
+  it('formato HEIC/HEIF: mensaje específico y sin documento', async () => {
+    const store = await openStore()
+    const s = store.createSubject('S')
+    const p = join(mkdtempSync(join(tmpdir(), 'ocr-')), 'foto.heic')
+    writeFileSync(p, Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypheic'), Buffer.alloc(32)]))
+    await expect(importImage({ store }, s.id, p, ocrOpts)).rejects.toThrow('Formato HEIC/HEIF no soportado: exporta la foto como JPG o PNG.')
+    expect(store.addDocument({ subjectId: s.id, title: 'sonda', sourceType: 'text' }).id).toBe(1)
+  })
+
+  it('datos de idioma inalcanzables: rechaza con mensaje claro dentro del plazo, sin colgarse', async () => {
+    const cachePath = mkdtempSync(join(tmpdir(), 'ocr-cache-')) // caché vacía: obliga a descargar
+    const t0 = Date.now()
+    const err = await ocrImage(fixture('foto-apuntes.png'), { langPath: 'http://127.0.0.1:9', cachePath, timeoutMs: 5000 }).catch((e) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).toMatch(/No se pudieron cargar los datos de idioma del OCR/)
+    expect(Date.now() - t0).toBeLessThan(15_000)
+  }, 30_000)
+
+  it('carga con plazo mínimo (timeoutMs 1): rechaza por tiempo agotado y cierra el worker tardío', async () => {
+    const err = await ocrImage(fixture('foto-apuntes.png'), { ...ocrOpts, timeoutMs: 1 }).catch((e) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).toMatch(/datos de idioma del OCR.*tiempo de espera agotado/)
+  }, SLOW)
+
+  it('recognize con plazo mínimo: rechaza con «El OCR tardó demasiado» y la promesa se resuelve', async () => {
+    const err = await ocrImage(fixture('foto-apuntes.png'), { ...ocrOpts, recognizeTimeoutMs: 1 }).catch((e) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).toMatch(/El OCR tardó demasiado/)
+  }, SLOW)
+
   it('importImage con archivo inexistente no deja documento', async () => {
     const store = await openStore()
     const s = store.createSubject('S')
@@ -97,6 +127,14 @@ describe('confirmOcr', () => {
     const { store, s, doc } = await setup()
     expect(confirmOcr({ store }, doc.id, '  \n ')).toEqual([])
     expect(store.listChunks(s.id)).toEqual([])
+  })
+
+  it('documento que no es una imagen lanza error y no toca sus chunks', async () => {
+    const { store, s } = await setup()
+    const txt = store.addDocument({ subjectId: s.id, title: 'apuntes', sourceType: 'text' })
+    store.addChunks(txt.id, s.id, ['original'])
+    expect(() => confirmOcr({ store }, txt.id, 'otro texto')).toThrow(/no es una imagen/i)
+    expect(store.listChunks(s.id, txt.id).map((c) => c.text)).toEqual(['original'])
   })
 
   it('documento desconocido lanza error en español', async () => {

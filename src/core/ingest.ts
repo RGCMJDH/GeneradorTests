@@ -106,6 +106,8 @@ export async function importImage(
 export function confirmOcr(deps: IngestDeps, documentId: number, correctedText: string): Chunk[] {
   const document = deps.store.getDocument(documentId)
   if (!document) throw new Error(`El documento ${documentId} no existe.`)
+  if (document.sourceType !== 'image')
+    throw new Error(`El documento «${document.title}» no es una imagen: no se puede confirmar como OCR.`)
   const pieces = chunkText(correctedText.replace(/\r\n?/g, '\n'))
   deps.store.deleteChunks(documentId)
   if (pieces.length === 0) return []
