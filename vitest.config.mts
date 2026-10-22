@@ -5,6 +5,8 @@ export default defineConfig({
   resolve: { alias: { '@core': fileURLToPath(new URL('./src/core', import.meta.url)) } },
   test: {
     environment: 'node',
-    include: ['tests/**/*.test.ts']
+    // Los tests de UI activan jsdom con el docblock `// @vitest-environment jsdom`.
+    include: ['tests/**/*.test.{ts,tsx}'],
+    setupFiles: ['tests/setup.ts']
   }
 })

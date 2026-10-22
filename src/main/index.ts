@@ -1,11 +1,13 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { mkdirSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
 import { openStore } from '@core/store'
 import { OllamaProvider } from '@core/llm'
 import { loadModel } from './config'
 import { realCore, registerIpc, type DialogLike, type IpcContext } from './ipc'
+import { isAllowedNavigation } from './navigation'
 import { emit, fixtureDialog, runSmoke } from './smoke'
 
 const SMOKE = process.env['GT_SMOKE'] === '1'
@@ -58,12 +60,16 @@ function createWindow(): BrowserWindow {
   // El renderer solo puede mostrar la propia app: sin ventanas nuevas ni navegación externa.
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   const devUrl = process.env['ELECTRON_RENDERER_URL']
-  win.webContents.on('will-navigate', (e, url) => {
-    if (!(url.startsWith('file://') || (devUrl && url.startsWith(devUrl)))) e.preventDefault()
-  })
+  const indexPath = join(__dirname, '../renderer/index.html')
+  const guard = { devUrl, indexUrl: pathToFileURL(indexPath).href }
+  const deny = (e: { preventDefault(): void }, url: string): void => {
+    if (!isAllowedNavigation(url, guard)) e.preventDefault()
+  }
+  win.webContents.on('will-navigate', (e, url) => deny(e, url))
+  win.webContents.on('will-redirect', (e, url) => deny(e, url))
 
   if (devUrl) void win.loadURL(devUrl)
-  else void win.loadFile(join(__dirname, '../renderer/index.html'))
+  else void win.loadFile(indexPath)
   return win
 }
 
