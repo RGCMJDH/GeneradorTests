@@ -163,7 +163,7 @@ describe('S5: paneles de pestaña', () => {
     installApi({ subjects: { list: twoSubjects } })
     render(<App />)
     await userEvent.click(await screen.findByRole('button', { name: 'Biología' }))
-    expect(document.getElementById('panel-test')).toHaveAttribute('tabindex', '0')
+    expect(document.getElementById('panel-exercises')).toHaveAttribute('tabindex', '0')
     expect(screen.getByRole('tabpanel', { name: 'Apuntes' })).not.toHaveAttribute('tabindex')
   })
 })

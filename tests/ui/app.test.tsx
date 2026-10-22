@@ -25,7 +25,7 @@ describe('App', () => {
     expect(screen.getByRole('tabpanel', { name: 'Apuntes' })).toBeVisible()
   })
 
-  it('navega las pestañas con el teclado y las demás son marcadores de posición', async () => {
+  it('navega las pestañas con el teclado y la de Ejercicios sigue siendo un marcador de posición', async () => {
     installApi({ subjects: { list: subjects } })
     render(<App />)
     await userEvent.click(await screen.findByRole('button', { name: 'Biología' }))
@@ -33,7 +33,9 @@ describe('App', () => {
     await userEvent.keyboard('{ArrowRight}')
     expect(screen.getByRole('tab', { name: 'Test' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByRole('tab', { name: 'Test' })).toHaveFocus()
-    expect(screen.getByRole('tabpanel', { name: 'Test' })).toHaveTextContent('Disponible en la siguiente fase')
+    expect(screen.getByRole('tabpanel', { name: 'Test' })).toHaveTextContent('Tipo de pregunta')
+    await userEvent.keyboard('{ArrowRight}')
+    expect(screen.getByRole('tabpanel', { name: 'Ejercicios' })).toHaveTextContent('Disponible en la siguiente fase')
     await userEvent.keyboard('{End}')
     expect(screen.getByRole('tab', { name: 'Historial' })).toHaveFocus()
     await userEvent.keyboard('{ArrowRight}') // da la vuelta

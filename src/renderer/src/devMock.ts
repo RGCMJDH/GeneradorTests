@@ -1,6 +1,6 @@
 // __GT_DEV_MOCK__ — marcador para verificar que este archivo NO llega al paquete de producción.
 // `window.api` falso en memoria para previsualizar la interfaz en un navegador normal (solo `vite dev`).
-import type { Api, Chunk, DocumentInfo, ImportKind, Result, Subject } from '../../shared/api'
+import type { Api, Chunk, DocumentInfo, GradeResultDto, HistoryAttempt, ImportKind, Question, Result, Subject } from '../../shared/api'
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 const ok = <T>(data: T): Result<T> => ({ ok: true, data })
@@ -27,6 +27,12 @@ export function createDevMockApi(): Api {
   const docs: DocumentInfo[] = []
   const chunks: Chunk[] = []
   const questionsByDoc = new Map<number, number>()
+  // Estado del test simulado.
+  const questionsById = new Map<number, Question>()
+  const question = (id: number): Question | undefined => questionsById.get(id)
+  const attempts: (HistoryAttempt & { subjectId: number })[] = []
+  const listeners = new Set<(e: { requestId: string; done: number; total: number }) => void>()
+  const cancelled = new Set<string>()
 
   const addDoc = (subjectId: number, title: string, sourceType: ImportKind, texts: string[]): DocumentInfo => {
     const d: DocumentInfo = { id: nextId++, subjectId, title, sourceType, chunkCount: 0 }
@@ -94,14 +100,98 @@ export function createDevMockApi(): Api {
       }
     },
     quiz: {
-      generate: async () => fail('No disponible en la vista previa'),
-      cancel: async () => ok({ cancelled: false }),
-      onProgress: () => () => {},
-      startAttempt: async () => fail('No disponible en la vista previa'),
-      finishAttempt: async () => ok(null),
-      submit: async () => fail('No disponible en la vista previa')
+      // Genera (como mucho) 3 preguntas de tipos distintos con citas literales de los fragmentos de la asignatura.
+      // Tema "física cuántica" → sin material. Con más de 3 preguntas pedidas, el resto sale como descartadas.
+      generate: async (req) => {
+        const pool = chunks.filter((c) => c.subjectId === req.subjectId && (req.documentId === undefined || c.documentId === req.documentId))
+        if (req.topic?.toLowerCase().includes('física cuántica') || pool.length === 0) {
+          await delay(500)
+          return ok({ questions: [], discarded: 0, reasons: [], insufficient: true })
+        }
+        const kinds: Question['type'][] = ['vf', 'test', 'desarrollo']
+        const made = Math.min(req.count, 3)
+        const out: Question[] = []
+        cancelled.delete(req.requestId)
+        for (let i = 0; i < made; i++) {
+          await delay(900)
+          listeners.forEach((cb) => cb({ requestId: req.requestId, done: i, total: req.count }))
+          if (cancelled.has(req.requestId)) break
+          const c = pool[i % pool.length] as Chunk
+          const type = kinds[i % kinds.length] as Question['type']
+          // Cita literal = primera frase del fragmento (siempre es subcadena del texto).
+          const quote = c.text.split(/(?<=\.)\s/)[0] ?? c.text
+          const q: Question = {
+            id: nextId++,
+            subjectId: req.subjectId,
+            chunkId: c.id,
+            type,
+            prompt:
+              type === 'vf'
+                ? quote
+                : type === 'test'
+                  ? 'Según tus apuntes, ¿qué afirmación es correcta?'
+                  : `Explica con tus palabras lo que dicen tus apuntes sobre: «${quote.split(' ').slice(0, 8).join(' ')}…»`,
+            ...(type === 'test' ? { options: ['Los apuntes no dicen nada sobre este tema.', quote, 'Esta afirmación es falsa en todos los casos.', 'Solo se aplica a las plantas.'] } : {}),
+            answer: type === 'vf' ? 'verdadero' : quote,
+            explanation: 'Se explica en el fragmento citado.',
+            quote
+          }
+          questionsById.set(q.id as number, q)
+          out.push(q)
+        }
+        if (!cancelled.has(req.requestId)) listeners.forEach((cb) => cb({ requestId: req.requestId, done: made, total: req.count }))
+        const dropped = cancelled.has(req.requestId) ? 0 : req.count - made
+        return ok({
+          questions: out,
+          discarded: dropped,
+          reasons: Array.from({ length: dropped }, (_, k) => `Pregunta ${made + k + 1}: la cita no aparece literalmente en el fragmento`),
+          insufficient: false
+        })
+      },
+      cancel: async (requestId) => {
+        cancelled.add(requestId)
+        return ok({ cancelled: true })
+      },
+      onProgress: (cb) => {
+        listeners.add(cb)
+        return () => listeners.delete(cb)
+      },
+      startAttempt: async (subjectId) => {
+        const id = nextId++
+        attempts.push({ id, subjectId, startedAt: new Date().toISOString(), finishedAt: null, answers: [] })
+        return ok({ attemptId: id })
+      },
+      finishAttempt: async (_subjectId, attemptId) => {
+        const a = attempts.find((x) => x.id === attemptId)
+        if (a) a.finishedAt = new Date().toISOString()
+        return ok(null)
+      },
+      // vf/test: corrección exacta con cita verificada. desarrollo: acierta si responde algo largo; si la respuesta
+      // contiene "sin cita" simula una cita del modelo no verificada (sin insignia).
+      submit: async ({ attemptId, questionId, answer }) => {
+        await delay(question(questionId)?.type === 'desarrollo' ? 1200 : 200)
+        const q = question(questionId)
+        const a = attempts.find((x) => x.id === attemptId)
+        if (!q || !a) return fail('La pregunta o el intento no existe', 'NOT_FOUND')
+        let res: GradeResultDto
+        if (q.type === 'desarrollo') {
+          const unverified = answer.toLowerCase().includes('sin cita')
+          const correct = answer.trim().length > 20
+          res = {
+            correct,
+            feedback: (correct ? 'Tu respuesta recoge la idea principal del fragmento.' : 'Falta desarrollar la idea principal del fragmento.') + (unverified ? ' (cita del modelo no verificada)' : ''),
+            quote: unverified ? '' : q.quote,
+            verified: !unverified
+          }
+        } else {
+          const correct = answer.trim().toLowerCase() === q.answer.trim().toLowerCase()
+          res = { correct, feedback: `${correct ? 'Correcto.' : `Incorrecto. La respuesta correcta es: ${q.answer}.`} ${q.explanation}`, quote: q.quote, verified: true }
+        }
+        a.answers.push({ questionId, prompt: q.prompt, type: q.type, userAnswer: answer, correct: res.correct, feedback: res.feedback, feedbackQuote: res.quote })
+        return ok(res)
+      }
     },
-    history: { list: async () => ok([]) },
+    history: { list: async (subjectId) => ok(attempts.filter((a) => a.subjectId === subjectId).map(({ subjectId: _s, ...rest }) => ({ ...rest, answers: [...rest.answers] }))) },
     system: {
       // Ollama aparece caído durante los primeros 4 s tras cargar (React StrictMode llama dos veces al montar,
       // así que no sirve contar llamadas); después, "Reintentar" lo encuentra listo.

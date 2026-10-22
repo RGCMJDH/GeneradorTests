@@ -6,23 +6,28 @@ import { Tabs } from './components/Tabs'
 import Diagnostics from './views/Diagnostics'
 import ExercisesTab from './views/ExercisesTab'
 import HistoryTab from './views/HistoryTab'
-import Notes, { type Blocking } from './views/Notes'
+import Notes from './views/Notes'
 import Subjects from './views/Subjects'
 import TestTab from './views/TestTab'
+import type { Blocking } from './views/types'
 
 export default function App() {
   const [subject, setSubject] = useState<Subject | null>(null)
   const [tab, setTab] = useState('notes')
-  // Trabajo sin terminar en Apuntes (importación en curso / revisión OCR): cambiar de asignatura lo perdería.
-  const [blocking, setBlocking] = useState<Blocking>(null)
-  const [switchTo, setSwitchTo] = useState<Subject | null>(null)
+  // Trabajo sin terminar: importación en curso / revisión OCR (Apuntes) o test en curso (Test). Cambiar de asignatura lo perdería.
+  const [notesBlocking, setNotesBlocking] = useState<Blocking>(null)
+  const [quizBlocking, setQuizBlocking] = useState<Blocking>(null)
+  const blocking = quizBlocking ?? notesBlocking
+  // Se guarda también el motivo del bloqueo en el momento de pedir el cambio: el texto del diálogo no cambia si el trabajo termina mientras está abierto.
+  const [switchTo, setSwitchTo] = useState<{ to: Subject; kind: Blocking } | null>(null)
   // "Ver fragmento" desde cualquier pestaña trae primero la pestaña Apuntes.
   const revealNotes = useCallback(() => setTab('notes'), [])
+  const showHistory = useCallback(() => setTab('history'), [])
 
   const trySelect = useCallback(
     (next: Subject) => {
       if (next.id === subject?.id) return
-      if (blocking) setSwitchTo(next)
+      if (blocking) setSwitchTo({ to: next, kind: blocking })
       else setSubject(next)
     },
     [subject, blocking]
@@ -50,10 +55,10 @@ export default function App() {
                 active={tab}
                 onChange={setTab}
                 tabs={[
-                  { id: 'notes', label: 'Apuntes', content: <Notes subject={subject} onBlockingChange={setBlocking} /> },
-                  { id: 'test', label: 'Test', content: <TestTab subject={subject} /> },
+                  { id: 'notes', label: 'Apuntes', content: <Notes subject={subject} onBlockingChange={setNotesBlocking} /> },
+                  { id: 'test', label: 'Test', content: <TestTab subject={subject} active={tab === 'test'} onBlockingChange={setQuizBlocking} onShowHistory={showHistory} /> },
                   { id: 'exercises', label: 'Ejercicios', content: <ExercisesTab subject={subject} /> },
-                  { id: 'history', label: 'Historial', content: <HistoryTab subject={subject} /> }
+                  { id: 'history', label: 'Historial', content: <HistoryTab subject={subject} active={tab === 'history'} /> }
                 ]}
               />
             </section>
@@ -69,11 +74,16 @@ export default function App() {
           danger
           onCancel={() => setSwitchTo(null)}
           onConfirm={() => {
-            setSubject(switchTo)
+            setSubject(switchTo.to)
             setSwitchTo(null)
           }}
         >
-          {blocking === 'ocr' ? (
+          {switchTo.kind === 'quiz' ? (
+            <p>
+              Tienes un test en curso (generando preguntas o respondiendo). Si cambias de asignatura se cancelará la generación y las preguntas sin responder
+              quedarán fuera del intento. Las respuestas que ya enviaste se conservan en el historial como un intento sin terminar.
+            </p>
+          ) : switchTo.kind === 'ocr' ? (
             <p>
               Tienes una revisión de OCR sin confirmar. Si cambias de asignatura se perderá el texto reconocido: la foto quedará como documento «Sin trocear» y
               podrás reanudar la revisión, pero tendrás que escribir el texto de nuevo.

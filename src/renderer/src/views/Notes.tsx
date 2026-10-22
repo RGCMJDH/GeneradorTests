@@ -6,7 +6,7 @@ import { UNEXPECTED_ERROR } from '../errors'
 import { NotesChunks } from './NotesChunks'
 import { NotesDocuments } from './NotesDocuments'
 import OcrReview from './OcrReview'
-import type { TabProps } from './types'
+import type { Blocking, TabProps } from './types'
 
 const BUTTONS: { kind: ImportKind; label: string }[] = [
   { kind: 'text', label: 'Importar texto o Markdown' },
@@ -24,7 +24,7 @@ const NO_TEXT_MESSAGE =
   'Este PDF no contiene texto seleccionable (probablemente es un escaneo). El OCR de esta aplicación solo funciona con imágenes, ' +
   'así que no se puede pasar un PDF por OCR directamente. Exporta sus páginas como imágenes (PNG o JPG) e impórtalas con «Importar foto».'
 
-export type Blocking = 'import' | 'ocr' | null
+export type { Blocking }
 
 interface Props extends TabProps {
   /** Avisa al padre de que hay trabajo que se perdería al cambiar de asignatura (importación en curso o revisión OCR abierta). */
