@@ -45,6 +45,35 @@ describe('store', () => {
     expect(store.listQuestions(s.id)).toEqual([])
   })
 
+  it('getDocument devuelve el documento o undefined', async () => {
+    const store = await openStore()
+    const s = store.createSubject('S')
+    const d = store.addDocument({ subjectId: s.id, title: 'foto', sourceType: 'image', path: 'x.png' })
+    expect(store.getDocument(d.id)).toEqual(d)
+    expect(store.getDocument(999)).toBeUndefined()
+  })
+
+  it('deleteChunks borra solo los chunks de ese documento (y sus preguntas)', async () => {
+    const store = await openStore()
+    const a = store.createSubject('A')
+    const b = store.createSubject('B')
+    const d1 = store.addDocument({ subjectId: a.id, title: 'd1', sourceType: 'text' })
+    const d2 = store.addDocument({ subjectId: a.id, title: 'd2', sourceType: 'text' })
+    const db = store.addDocument({ subjectId: b.id, title: 'db', sourceType: 'text' })
+    const [c1] = store.addChunks(d1.id, a.id, ['x', 'y'])
+    store.addChunks(d2.id, a.id, ['z'])
+    store.addChunks(db.id, b.id, ['w'])
+    store.saveQuestion({ subjectId: a.id, chunkId: c1.id, type: 'vf', prompt: 'p', answer: 'V', explanation: 'e', quote: 'x' })
+    store.deleteChunks(d1.id)
+    expect(store.listChunks(a.id, d1.id)).toEqual([])
+    expect(store.listChunks(a.id).map((c) => c.text)).toEqual(['z'])
+    expect(store.listChunks(b.id).map((c) => c.text)).toEqual(['w'])
+    expect(store.listQuestions(a.id)).toEqual([])
+    expect(store.getDocument(d1.id)).toBeDefined()
+    store.addChunks(d1.id, a.id, ['nuevo'])
+    expect(store.listChunks(a.id, d1.id).map((c) => c.position)).toEqual([0])
+  })
+
   it('actualiza el texto de un chunk', async () => {
     const store = await openStore()
     const s = store.createSubject('S')

@@ -31,6 +31,9 @@ export interface Store {
   addChunks(documentId: number, subjectId: number, texts: string[]): Chunk[]
   listChunks(subjectId: number, documentId?: number): Chunk[]
   getChunk(id: number): Chunk | undefined
+  getDocument(id: number): Doc | undefined
+  /** Borra los chunks (y sus preguntas) de un documento, conservando el documento. */
+  deleteChunks(documentId: number): void
   updateChunkText(id: number, text: string): void
   deleteDocument(id: number): void
   saveQuestion(q: Question): Question
@@ -219,6 +222,18 @@ export async function openStore(filePath?: string, opts?: { wasmDir?: string }):
     getChunk(id) {
       const r = query('SELECT * FROM chunks WHERE id = ?', [id])[0]
       return r ? toChunk(r) : undefined
+    },
+    getDocument(id) {
+      const r = query('SELECT * FROM documents WHERE id = ?', [id])[0]
+      if (!r) return undefined
+      return {
+        id: r.id as number, subjectId: r.subject_id as number, title: r.title as string,
+        sourceType: r.source_type as Doc['sourceType'],
+        ...(r.path != null ? { path: r.path as string } : {})
+      }
+    },
+    deleteChunks(documentId) {
+      write('DELETE FROM chunks WHERE document_id = ?', [documentId]) // las preguntas caen en cascada
     },
     updateChunkText(id, text) {
       write('UPDATE chunks SET text = ? WHERE id = ?', [text, id])

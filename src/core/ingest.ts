@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { basename, extname } from 'node:path'
 import { PDFParse } from 'pdf-parse'
 import { chunkText } from './chunker'
+import { ocrImage, type OcrOptions } from './ocr'
 import type { Store } from './store'
 import type { Chunk, Doc } from './types'
 
@@ -77,4 +78,36 @@ export async function importPdf(deps: IngestDeps, subjectId: number, filePath: s
   // Se comprueba ANTES de crear el documento para no dejar filas huérfanas.
   if (text.trim().length === 0) throw new NoTextError()
   return saveDocument(deps, subjectId, filePath, 'pdf', text)
+}
+
+export interface ImageImportResult {
+  document: Doc
+  /** Texto reconocido tal cual; el usuario lo revisa y lo confirma con `confirmOcr`. Puede ser ''. */
+  ocrText: string
+}
+
+/**
+ * Hace OCR de una foto y crea el documento, pero NO crea chunks: el texto de un OCR casi siempre
+ * necesita revisión humana antes de usarlo para generar preguntas (ver `confirmOcr`).
+ */
+export async function importImage(
+  deps: IngestDeps,
+  subjectId: number,
+  filePath: string,
+  opts?: OcrOptions
+): Promise<ImageImportResult> {
+  // El OCR va ANTES de crear el documento: si falla no queda ninguna fila huérfana.
+  const ocrText = await ocrImage(filePath, opts)
+  const document = deps.store.addDocument({ subjectId, title: titleOf(filePath), sourceType: 'image', path: filePath })
+  return { document, ocrText }
+}
+
+/** Trocea el texto corregido por el usuario y lo guarda; reemplaza lo confirmado antes para ese documento. */
+export function confirmOcr(deps: IngestDeps, documentId: number, correctedText: string): Chunk[] {
+  const document = deps.store.getDocument(documentId)
+  if (!document) throw new Error(`El documento ${documentId} no existe.`)
+  const pieces = chunkText(correctedText.replace(/\r\n?/g, '\n'))
+  deps.store.deleteChunks(documentId)
+  if (pieces.length === 0) return []
+  return deps.store.addChunks(documentId, document.subjectId, pieces)
 }
