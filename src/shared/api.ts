@@ -42,6 +42,8 @@ export type ErrorCode =
   | 'NOT_FOUND'
   | 'NO_TEXT' // PDF sin texto: la UI puede ofrecer OCR
   | 'WOULD_DELETE_QUESTIONS' // confirmOcr borraría preguntas guardadas; repetir con force:true
+  | 'MODEL_UNAVAILABLE' // el modelo no respondió en ningún fragmento (Ollama caído o sin modelo)
+  | 'STALE' // los apuntes cambiaron mientras se trabajaba; repetir
   | 'INTERNAL'
 
 export type Failure = { ok: false; error: string; code?: ErrorCode; count?: number }
@@ -106,17 +108,20 @@ export interface ConceptsBuildRequest {
   /** Lo elige el renderer; sirve para cancelar y para filtrar eventos de progreso. */
   requestId: string
   subjectId: number
-  /** Solo analiza ese documento. En ese caso el resultado NO sustituye al índice guardado de la asignatura. */
+  /** Solo analiza ese documento; el resultado se MEZCLA con el índice guardado (los demás documentos no se tocan). */
   documentId?: number
 }
 
 export interface ConceptsOutcome {
+  /** El índice de la asignatura tras la extracción (con documentId, ya mezclado). Si se canceló: lo parcial, que NO se guardó. */
   concepts: Concept[]
-  /** true si se canceló: entonces `concepts` es parcial y NO se ha guardado (el índice anterior se conserva). */
+  /** true si se canceló: el índice anterior se conserva. */
   cancelled: boolean
-  /** Fragmentos analizados / fragmentos disponibles (hay un tope por ejecución). */
+  /** Fragmentos analizados / fragmentos disponibles (hay un tope por ejecución, repartido entre documentos). */
   analyzed: number
   total: number
+  /** De los analizados, los que fallaron (el modelo lanzó un error o respondió mal). */
+  failed: number
 }
 
 export interface SubmitRequest {

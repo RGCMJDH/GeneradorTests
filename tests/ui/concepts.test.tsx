@@ -13,7 +13,7 @@ import { doc, installApi } from './fakeApi'
 const ADN: Concept = { term: 'ADN', chunkIds: [11, 12], related: ['núcleo celular', 'ARN'] }
 const RIBO: Concept = { term: 'ribosomas', chunkIds: [13], related: [] }
 const okC = <T,>(data: T) => Promise.resolve({ ok: true as const, data })
-const outcome = (concepts: Concept[], over: Partial<ConceptsOutcome> = {}): ConceptsOutcome => ({ concepts, cancelled: false, analyzed: 3, total: 3, ...over })
+const outcome = (concepts: Concept[], over: Partial<ConceptsOutcome> = {}): ConceptsOutcome => ({ concepts, cancelled: false, analyzed: 3, total: 3, failed: 0, ...over })
 
 function Probe() {
   const { request } = useChunkFocus()

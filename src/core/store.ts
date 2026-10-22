@@ -25,6 +25,14 @@ export interface Attempt {
 
 export type NewAnswer = Omit<AnswerRecord, 'id'>
 
+/** Un concepto cita un chunk que ya no existe o es de otra asignatura (p. ej. se borró un documento durante la extracción). */
+export class StaleConceptsError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'StaleConceptsError'
+  }
+}
+
 export interface Store {
   createSubject(name: string): Subject
   listSubjects(): Subject[]
@@ -46,8 +54,8 @@ export interface Store {
   finishAttempt(id: number): void
   listAttempts(subjectId: number): Attempt[]
   /**
-   * Sustituye (en una transacción) el índice de conceptos de la asignatura. Lanza, sin cambiar nada,
-   * si algún concepto no tiene chunks o cita un chunk que no es de esa asignatura.
+   * Sustituye (en una transacción) el índice de conceptos de la asignatura. Lanza, sin cambiar nada, si algún concepto
+   * no tiene chunks o cita un chunk que no es de esa asignatura (StaleConceptsError).
    */
   saveConcepts(subjectId: number, concepts: Concept[]): void
   /**
@@ -300,7 +308,7 @@ export async function openStore(filePath?: string, opts?: { wasmDir?: string }):
       for (const c of concepts) {
         if (c.chunkIds.length === 0) throw new Error(`El concepto «${c.term}» no cita ningún fragmento`)
         const foreign = c.chunkIds.find((id) => !own.has(id))
-        if (foreign !== undefined) throw new Error(`El chunk ${foreign} no existe o no pertenece a la asignatura ${subjectId}`)
+        if (foreign !== undefined) throw new StaleConceptsError(`El chunk ${foreign} no existe o no pertenece a la asignatura ${subjectId}`)
       }
       db.run('BEGIN')
       try {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Concept } from '../../../shared/api'
+import type { Concept, DocumentInfo } from '../../../shared/api'
 import { Alert, Busy } from '../components/Alert'
 import { useChunkFocus } from '../chunkFocus'
 import { UNEXPECTED_ERROR } from '../errors'
@@ -7,6 +7,8 @@ import { newRequestId } from '../requestId'
 
 interface Props {
   subjectId: number
+  /** Documentos de la asignatura: se puede extraer de todos o de uno concreto. */
+  docs?: DocumentInfo[]
   /** Avisa al padre de que hay una extracción en curso (se perdería al cambiar de asignatura). */
   onBusyChange?(busy: boolean): void
 }
@@ -24,16 +26,23 @@ const fragmentos = (n: number): string => `${n} ${n === 1 ? 'fragmento' : 'fragm
  * Índice de conceptos de la asignatura. Cada término procede literalmente de los apuntes (lo verifica el núcleo);
  * aquí todo se pinta como nodo de texto de React. «Ver fragmento» reutiliza el foco de fragmentos (como QuoteLink).
  */
-export default function Concepts({ subjectId, onBusyChange }: Props) {
+export default function Concepts({ subjectId, docs = [], onBusyChange }: Props) {
   const [concepts, setConcepts] = useState<Concept[] | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [job, setJob] = useState<Job | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState('')
+  const [docChoice, setDocChoice] = useState('')
+  const [focusNonce, setFocusNonce] = useState(0)
+  const sectionRef = useRef<HTMLElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
   const alive = useRef(true)
   const running = useRef<{ requestId: string; off(): void } | null>(null)
   const { focusChunk } = useChunkFocus()
   const busy = job !== null
+  const withChunks = docs.filter((d) => d.chunkCount > 0)
+  // Un documento elegido que ya no existe vuelve a «Todos».
+  const selectedDoc = withChunks.find((d) => String(d.id) === docChoice)
 
   useEffect(() => {
     alive.current = true
@@ -52,6 +61,13 @@ export default function Concepts({ subjectId, onBusyChange }: Props) {
     onBusyChange?.(busy)
   }, [busy, onBusyChange])
   useEffect(() => () => onBusyChange?.(false), [onBusyChange])
+
+  // Al terminar (o cancelar) desaparece el botón que tenía el foco: va a un destino estable, salvo que el usuario ya esté en otro control.
+  useEffect(() => {
+    if (focusNonce === 0) return
+    const a = document.activeElement
+    if (!a || a === document.body || sectionRef.current?.contains(a)) buttonRef.current?.focus()
+  }, [focusNonce])
 
   useEffect(() => {
     let live = true
@@ -86,7 +102,7 @@ export default function Concepts({ subjectId, onBusyChange }: Props) {
     })
     running.current = { requestId, off }
     try {
-      const res = await window.api.concepts.build({ requestId, subjectId })
+      const res = await window.api.concepts.build({ requestId, subjectId, ...(selectedDoc ? { documentId: selectedDoc.id } : {}) })
       if (!alive.current) return
       if (!res.ok) setError(res.error)
       else if (res.data.cancelled) setStatus('Extracción cancelada: no se guardó nada y se conserva el índice anterior.')
@@ -95,17 +111,26 @@ export default function Concepts({ subjectId, onBusyChange }: Props) {
         setConcepts(out.concepts)
         setSelected(null)
         const n = out.concepts.length
-        setStatus(
-          `${n} ${n === 1 ? 'concepto extraído' : 'conceptos extraídos'} de ${fragmentos(out.analyzed)}.` +
-            (out.analyzed < out.total ? ` Se analizaron ${out.analyzed} de ${out.total} fragmentos (máximo por ejecución); el resto no se ha analizado.` : '')
-        )
+        const parts = [`${n} ${n === 1 ? 'concepto extraído' : 'conceptos extraídos'} de ${fragmentos(out.analyzed)}.`]
+        if (out.failed > 0)
+          parts.push(`${out.failed} ${out.failed === 1 ? 'fragmento no se pudo analizar' : 'fragmentos no se pudieron analizar'} (puedes volver a extraer para reintentarlos).`)
+        if (out.analyzed < out.total)
+          parts.push(
+            !selectedDoc && withChunks.length > 1
+              ? `Se analizaron ${out.analyzed} de ${out.total} fragmentos; para el resto extrae los conceptos de un documento concreto.`
+              : `Se analizaron ${out.analyzed} de ${out.total} fragmentos (máximo por ejecución); el resto no se ha analizado.`
+          )
+        setStatus(parts.join(' '))
       }
     } catch {
       if (alive.current) setError(UNEXPECTED_ERROR)
     } finally {
       off()
       if (running.current?.requestId === requestId) running.current = null
-      if (alive.current) setJob(null)
+      if (alive.current) {
+        setJob(null)
+        setFocusNonce((x) => x + 1)
+      }
     }
   }
 
@@ -128,14 +153,27 @@ export default function Concepts({ subjectId, onBusyChange }: Props) {
   const current = concepts?.find((c) => c.term === selected) ?? null
 
   return (
-    <section aria-labelledby="notes-concepts" className="concepts">
+    <section ref={sectionRef} aria-labelledby="notes-concepts" className="concepts">
       <h3 id="notes-concepts">Conceptos</h3>
       <p className="muted">
         Términos clave que aparecen literalmente en tus apuntes. Extraerlos usa la IA local fragmento a fragmento y puede tardar varios minutos en un equipo sin tarjeta gráfica;
-        se analizan como máximo los primeros 60 fragmentos. Puedes cancelar en cualquier momento.
+        se analizan como máximo 60 fragmentos por ejecución, repartidos entre los documentos. Puedes cancelar en cualquier momento.
       </p>
       <div className="row">
-        <button type="button" className="btn btn--primary" disabled={busy} onClick={() => void extract()}>
+        {withChunks.length > 0 && (
+          <>
+            <label htmlFor="concepts-doc">Documento a analizar</label>
+            <select id="concepts-doc" value={selectedDoc ? docChoice : ''} disabled={busy} onChange={(e) => setDocChoice(e.target.value)}>
+              <option value="">Todos los documentos</option>
+              {withChunks.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.title}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
+        <button ref={buttonRef} type="button" className="btn btn--primary" disabled={busy} onClick={() => void extract()}>
           Extraer conceptos
         </button>
         {job && (

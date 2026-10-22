@@ -173,7 +173,7 @@ export default function Notes({ subject, onBlockingChange }: Props) {
         />
       </section>
 
-      <Concepts subjectId={sid} onBusyChange={setConceptsBusy} />
+      <Concepts subjectId={sid} docs={docs} onBusyChange={setConceptsBusy} />
 
       <section aria-labelledby="notes-chunks">
         <h3 id="notes-chunks">Fragmentos</h3>

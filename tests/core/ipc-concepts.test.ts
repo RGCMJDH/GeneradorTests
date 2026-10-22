@@ -45,8 +45,8 @@ async function withNotes(st: Store) {
 
 const fakeExtract = (concepts: (chunkId: number) => Concept[], chunkId = 0): CoreFns['extractConcepts'] =>
   (async (_deps, _sid, opts) => {
-    opts?.onProgress?.(1, 2)
-    opts?.onProgress?.(2, 2)
+    ;(opts?.onProgress as ((d: number, t: number) => void) | undefined)?.(1, 2)
+    ;(opts?.onProgress as ((d: number, t: number) => void) | undefined)?.(2, 2)
     return concepts(chunkId)
   }) as CoreFns['extractConcepts']
 
@@ -77,7 +77,7 @@ describe('concepts:build', () => {
     const extract = vi.fn(fakeExtract(() => [{ term: 'ADN', chunkIds: [c1.id], related: [] }]))
     const t = await setup(extract as unknown as CoreFns['extractConcepts'], st)
     const r = await t.call<ConceptsOutcome>('concepts:build', { requestId: 'c1', subjectId: s.id })
-    expect(r).toEqual({ ok: true, data: { concepts: [{ term: 'ADN', chunkIds: [c1.id], related: [] }], cancelled: false, analyzed: 2, total: 2 } })
+    expect(r).toEqual({ ok: true, data: { concepts: [{ term: 'ADN', chunkIds: [c1.id], related: [] }], cancelled: false, analyzed: 2, total: 2, failed: 0 } })
     expect(t.sent).toEqual([
       { channel: events.conceptsProgress, payload: { requestId: 'c1', done: 1, total: 2 } },
       { channel: events.conceptsProgress, payload: { requestId: 'c1', done: 2, total: 2 } }
@@ -105,16 +105,16 @@ describe('concepts:build', () => {
     expect(extract).not.toHaveBeenCalled()
   })
 
-  it('con documentId analiza solo ese documento y NO sustituye el índice guardado', async () => {
+  it('con documentId analiza solo ese documento y se mezcla con el índice guardado (no lo sustituye)', async () => {
     const st = await openStore()
     const { s, d, c1, c2 } = await withNotes(st)
     st.saveConcepts(s.id, [{ term: 'ribosomas', chunkIds: [c2.id], related: [] }])
     const extract = vi.fn(fakeExtract(() => [{ term: 'ADN', chunkIds: [c1.id], related: [] }]))
     const { call } = await setup(extract as unknown as CoreFns['extractConcepts'], st)
     const r = await call<ConceptsOutcome>('concepts:build', { requestId: 'd', subjectId: s.id, documentId: d.id })
-    expect(r.ok && r.data.concepts.map((c) => c.term)).toEqual(['ADN'])
+    expect(r.ok && r.data.concepts.map((c) => c.term)).toEqual(['ADN', 'ribosomas']) // lo guardado tras mezclar
     expect(((extract.mock.calls[0] as unknown[])[2] as { documentId?: number }).documentId).toBe(d.id)
-    expect(st.listConcepts(s.id).map((c) => c.term)).toEqual(['ribosomas'])
+    expect(st.listConcepts(s.id).map((c) => c.term)).toEqual(['ADN', 'ribosomas'])
   })
 
   it('cancelar aborta la señal, devuelve cancelled:true y NO guarda lo parcial (se conserva el índice anterior)', async () => {
@@ -174,7 +174,9 @@ describe('concepts:build', () => {
     const st = await openStore()
     const { s, co } = await withNotes(st)
     const { call } = await setup(fakeExtract(() => [{ term: 'ADN', chunkIds: [co.id], related: [] }]), st)
-    expect(fail(await call('concepts:build', { requestId: 'x', subjectId: s.id })).code).toBe('INTERNAL')
+    const r = fail(await call('concepts:build', { requestId: 'x', subjectId: s.id }))
+    expect(r.code).toBe('STALE')
+    expect(r.error).toBe('Los apuntes cambiaron durante la extracción; vuelve a intentarlo.')
     expect(st.listConcepts(s.id)).toEqual([])
   })
 })

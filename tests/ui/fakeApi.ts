@@ -34,7 +34,7 @@ export function installApi(over: Over = {}): Api {
     history: { list: vi.fn(() => ok([])), ...over.history },
     concepts: {
       list: vi.fn(() => ok([])),
-      build: vi.fn(() => ok({ concepts: [], cancelled: false, analyzed: 0, total: 0 })),
+      build: vi.fn(() => ok({ concepts: [], cancelled: false, analyzed: 0, total: 0, failed: 0 })),
       cancel: vi.fn(() => ok({ cancelled: true })),
       onProgress: vi.fn(() => () => {}),
       ...over.concepts

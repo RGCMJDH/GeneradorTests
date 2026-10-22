@@ -31,4 +31,20 @@ describe('devMock: conceptos', () => {
     expect(r.ok && r.data.cancelled).toBe(true)
     expect(await api.concepts.list(1)).toEqual({ ok: true, data: [] })
   }, 15_000)
+
+  it('con documentId solo analiza ese documento y el índice se mezcla con lo anterior', async () => {
+    const api = createDevMockApi()
+    const first = await api.notes.import(1, 'text')
+    const second = await api.notes.import(1, 'text')
+    if (!first.ok || first.data.canceled || first.data.kind === 'image' || !second.ok || second.data.canceled || second.data.kind === 'image') throw new Error('import')
+    const a = await api.concepts.build({ requestId: 'c3', subjectId: 1, documentId: first.data.document.id })
+    expect(a.ok && a.data.total).toBe(first.data.document.chunkCount)
+    const afterFirst = await api.concepts.list(1)
+    const b = await api.concepts.build({ requestId: 'c4', subjectId: 1, documentId: second.data.document.id })
+    expect(b.ok && b.data.analyzed).toBe(second.data.document.chunkCount)
+    const merged = b.ok ? b.data.concepts : []
+    const before = afterFirst.ok ? afterFirst.data : []
+    expect(merged.length).toBe(before.length) // mismos términos
+    for (const c of merged) expect(c.chunkIds.length).toBe((before.find((x) => x.term === c.term)?.chunkIds.length ?? 0) * 2) // ahora de los dos documentos
+  }, 20_000)
 })

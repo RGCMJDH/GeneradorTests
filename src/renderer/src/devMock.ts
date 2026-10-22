@@ -46,7 +46,21 @@ export function createDevMockApi(): Api {
   const attempts: (HistoryAttempt & { subjectId: number })[] = []
   const listeners = new Set<(e: { requestId: string; done: number; total: number }) => void>()
   const cancelled = new Set<string>()
-  const conceptIndex = new Map<number, Concept[]>()
+  // Términos por fragmento (lo que «extrajo» el simulador); el índice se deriva de aquí, así que un documento concreto se mezcla solo.
+  const chunkTerms = new Map<number, string[]>()
+  const indexOf = (subjectId: number): Concept[] => {
+    const byTerm = new Map<string, Concept>()
+    for (const c of chunks.filter((x) => x.subjectId === subjectId)) {
+      const terms = chunkTerms.get(c.id) ?? []
+      for (const term of terms) {
+        const k = byTerm.get(term) ?? { term, chunkIds: [], related: [] }
+        k.chunkIds.push(c.id)
+        k.related = [...new Set([...k.related, ...terms.filter((t) => t !== term)])].sort((a, b) => a.localeCompare(b, 'es'))
+        byTerm.set(term, k)
+      }
+    }
+    return [...byTerm.values()].sort((a, b) => b.chunkIds.length - a.chunkIds.length || a.term.localeCompare(b.term, 'es'))
+  }
   const conceptListeners = new Set<(e: { requestId: string; done: number; total: number }) => void>()
 
   const addDoc = (subjectId: number, title: string, sourceType: ImportKind, texts: string[]): DocumentInfo => {
@@ -256,31 +270,24 @@ export function createDevMockApi(): Api {
       }
     },
     concepts: {
-      list: async (subjectId) => ok((conceptIndex.get(subjectId) ?? []).map((c) => ({ ...c }))),
+      list: async (subjectId) => ok(indexOf(subjectId)),
       // Un fragmento cada 700 ms con progreso; «Cancelar» devuelve lo parcial sin guardarlo (igual que main).
-      build: async ({ requestId, subjectId }) => {
+      // Con documentId solo analiza ese documento y el resultado se mezcla con el índice.
+      build: async ({ requestId, subjectId, documentId }) => {
         cancelled.delete(requestId)
-        const pool = chunks.filter((c) => c.subjectId === subjectId)
-        const perChunk: Array<{ id: number; terms: string[] }> = []
+        const pool = chunks.filter((c) => c.subjectId === subjectId && (documentId === undefined || c.documentId === documentId))
+        const found = new Map<number, string[]>()
         for (let i = 0; i < pool.length; i++) {
           await delay(700)
           if (cancelled.has(requestId)) break
           const c = pool[i] as Chunk
-          perChunk.push({ id: c.id, terms: CONCEPT_VOCAB.filter((t) => hasTerm(c.text, t)) })
+          found.set(c.id, CONCEPT_VOCAB.filter((t) => hasTerm(c.text, t)))
           conceptListeners.forEach((cb) => cb({ requestId, done: i + 1, total: pool.length }))
         }
         const wasCancelled = cancelled.has(requestId)
-        const byTerm = new Map<string, Concept>()
-        for (const { id, terms } of perChunk)
-          for (const term of terms) {
-            const c = byTerm.get(term) ?? { term, chunkIds: [], related: [] }
-            c.chunkIds.push(id)
-            c.related = [...new Set([...c.related, ...terms.filter((t) => t !== term)])].sort((a, b) => a.localeCompare(b, 'es'))
-            byTerm.set(term, c)
-          }
-        const concepts = [...byTerm.values()].sort((a, b) => b.chunkIds.length - a.chunkIds.length || a.term.localeCompare(b.term, 'es'))
-        if (!wasCancelled) conceptIndex.set(subjectId, concepts)
-        return ok({ concepts, cancelled: wasCancelled, analyzed: perChunk.length, total: pool.length })
+        if (!wasCancelled) found.forEach((terms, id) => chunkTerms.set(id, terms))
+        const concepts = wasCancelled ? indexOf(subjectId).filter((c) => c.chunkIds.some((id) => found.has(id))) : indexOf(subjectId)
+        return ok({ concepts, cancelled: wasCancelled, analyzed: found.size, total: pool.length, failed: 0 })
       },
       cancel: async (requestId) => {
         cancelled.add(requestId)
