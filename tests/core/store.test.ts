@@ -224,4 +224,16 @@ describe('store', () => {
       rmSync(dir, { recursive: true, force: true })
     }
   })
+
+  it('listDocuments devuelve los documentos de la asignatura, también los que no tienen chunks', async () => {
+    const store = await openStore()
+    const a = store.createSubject('A')
+    const b = store.createSubject('B')
+    const d1 = store.addDocument({ subjectId: a.id, title: 'uno', sourceType: 'text', path: 'x.md' })
+    const d2 = store.addDocument({ subjectId: a.id, title: 'foto', sourceType: 'image' })
+    store.addDocument({ subjectId: b.id, title: 'otro', sourceType: 'pdf' })
+    store.addChunks(d1.id, a.id, ['hola'])
+    expect(store.listDocuments(a.id)).toEqual([d1, d2])
+    expect(store.listDocuments(999)).toEqual([])
+  })
 })

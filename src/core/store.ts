@@ -32,6 +32,8 @@ export interface Store {
   listChunks(subjectId: number, documentId?: number): Chunk[]
   getChunk(id: number): Chunk | undefined
   getDocument(id: number): Doc | undefined
+  /** Todos los documentos de la asignatura (incluidos los que aún no tienen chunks, p. ej. OCR sin confirmar). */
+  listDocuments(subjectId: number): Doc[]
   /** Borra los chunks (y sus preguntas) de un documento, conservando el documento. */
   deleteChunks(documentId: number): void
   updateChunkText(id: number, text: string): void
@@ -152,6 +154,11 @@ export async function openStore(filePath?: string, opts?: { wasmDir?: string }):
   }
 
   const toSubject = (r: Row): Subject => ({ id: r.id as number, name: r.name as string, createdAt: r.created_at as string })
+  const toDoc = (r: Row): Doc => ({
+    id: r.id as number, subjectId: r.subject_id as number, title: r.title as string,
+    sourceType: r.source_type as Doc['sourceType'],
+    ...(r.path != null ? { path: r.path as string } : {})
+  })
   const toChunk = (r: Row): Chunk => ({
     id: r.id as number, documentId: r.document_id as number, subjectId: r.subject_id as number,
     position: r.position as number, text: r.text as string
@@ -225,13 +232,10 @@ export async function openStore(filePath?: string, opts?: { wasmDir?: string }):
     },
     getDocument(id) {
       const r = query('SELECT * FROM documents WHERE id = ?', [id])[0]
-      if (!r) return undefined
-      return {
-        id: r.id as number, subjectId: r.subject_id as number, title: r.title as string,
-        sourceType: r.source_type as Doc['sourceType'],
-        ...(r.path != null ? { path: r.path as string } : {})
-      }
+      return r ? toDoc(r) : undefined
     },
+    listDocuments: (subjectId) =>
+      query('SELECT * FROM documents WHERE subject_id = ? ORDER BY id', [subjectId]).map(toDoc),
     deleteChunks(documentId) {
       write('DELETE FROM chunks WHERE document_id = ?', [documentId]) // las preguntas caen en cascada
     },
