@@ -57,6 +57,59 @@ describe('OllamaProvider.generateJson', () => {
     await expect(p.generateJson({ system: 's', user: 'u' })).rejects.toThrow(/Ollama.*500/)
   })
 
+  it('el consejo ollama pull sale solo con HTTP 404', async () => {
+    const msg = async (status: number) => {
+      const { impl } = fakeFetch(() => new Response('x', { status }))
+      const p = new OllamaProvider({ fetchImpl: impl })
+      return p.generateJson({ system: 's', user: 'u' }).then(
+        () => '',
+        (e: Error) => e.message
+      )
+    }
+    expect(await msg(404)).toContain('ollama pull qwen2.5:7b')
+    expect(await msg(500)).not.toContain('ollama pull')
+    expect(await msg(503)).not.toContain('ollama pull')
+  })
+
+  it('lanza error legible si falta message.content', async () => {
+    for (const body of [{}, { message: {} }, { message: { content: 42 } }]) {
+      const { impl } = fakeFetch(() => jsonResponse(body))
+      const p = new OllamaProvider({ fetchImpl: impl })
+      await expect(p.generateJson({ system: 's', user: 'u' })).rejects.toThrow(/sin contenido/)
+    }
+  })
+
+  it('pasa la señal a fetch y una señal ya cancelada rechaza con "cancelado"', async () => {
+    const { impl, calls } = fakeFetch(() => jsonResponse({ message: { content: '{}' } }))
+    const ac = new AbortController()
+    await new OllamaProvider({ fetchImpl: impl }).generateJson({ system: 's', user: 'u', signal: ac.signal })
+    expect(calls[0].init?.signal).toBe(ac.signal)
+
+    ac.abort()
+    const p = new OllamaProvider({ fetchImpl: impl })
+    await expect(p.generateJson({ system: 's', user: 'u', signal: ac.signal })).rejects.toThrow(/cancelado/)
+    expect(calls).toHaveLength(1)
+  })
+
+  it('cancelar durante la petición rechaza con "cancelado"', async () => {
+    const { impl } = fakeFetch(
+      (_u, init) =>
+        new Promise<Response>((_res, rej) => {
+          init?.signal?.addEventListener('abort', () =>
+            rej(new DOMException('aborted', 'AbortError'))
+          )
+        })
+    )
+    const ac = new AbortController()
+    const pending = new OllamaProvider({ fetchImpl: impl }).generateJson({
+      system: 's',
+      user: 'u',
+      signal: ac.signal
+    })
+    ac.abort()
+    await expect(pending).rejects.toThrow(/cancelado/)
+  })
+
   it('lanza error legible en español si falla la red', async () => {
     const { impl } = fakeFetch(() => {
       throw new TypeError('fetch failed')
@@ -91,8 +144,34 @@ describe('extractJson', () => {
     expect(extractJson('{"a":1} y luego {"b":2}')).toEqual({ a: 1 })
   })
 
-  it('salta candidatos inválidos y usa el siguiente JSON válido', () => {
+  it('salta un candidato balanceado que no es JSON y usa el siguiente { posterior', () => {
     expect(extractJson('mira {esto no es json} pero {"ok":true}')).toEqual({ ok: true })
+  })
+
+  it('salida truncada lanza (no devuelve un fragmento interno)', () => {
+    expect(() => extractJson('{"preguntas":[{"q":1},{"q":2}')).toThrow()
+    expect(() => extractJson('Aquí: {"preguntas":[{"q":1},{"q":2}')).toThrow()
+    expect(() => extractJson('```json\n{"preguntas":[{"q":1},{"q":2}\n```')).toThrow()
+  })
+
+  it('un objeto balanceado inválido no devuelve sus objetos internos', () => {
+    expect(() => extractJson('{"a":{"b":1},}')).toThrow()
+  })
+
+  it('prefiere el objeto sobre un array de prosa como [1]', () => {
+    expect(extractJson('Según [1]: {"a":1}')).toEqual({ a: 1 })
+  })
+
+  it('usa [ solo si no hay ninguna {', () => {
+    expect(extractJson('Resultado: [1,2,3] fin')).toEqual([1, 2, 3])
+  })
+
+  it('bloque ``` sin lenguaje', () => {
+    expect(extractJson('texto\n```\n{"a":1}\n```')).toEqual({ a: 1 })
+  })
+
+  it('comportamiento documentado: un {} vacío en la prosa antes del objeto real gana', () => {
+    expect(extractJson('El esquema {} es este: {"a":1}')).toEqual({})
   })
 
   it('extractJson lanza con basura', () => {
@@ -145,10 +224,11 @@ describe('OllamaProvider.health', () => {
     expect(r.message.length).toBeGreaterThan(0)
   })
 
-  it('health: modelo sin etiqueta coincide con cualquier etiqueta', async () => {
-    const { impl } = fakeFetch(() => jsonResponse({ models: [{ name: 'llama3:8b' }] }))
-    const r = await new OllamaProvider({ model: 'llama3', fetchImpl: impl }).health()
-    expect(r.ok).toBe(true)
+  it('health: modelo sin etiqueta coincide solo con <modelo>:latest', async () => {
+    const latest = fakeFetch(() => jsonResponse({ models: [{ name: 'llama3:latest' }] }))
+    expect((await new OllamaProvider({ model: 'llama3', fetchImpl: latest.impl }).health()).ok).toBe(true)
+    const other = fakeFetch(() => jsonResponse({ models: [{ name: 'llama3:8b' }] }))
+    expect((await new OllamaProvider({ model: 'llama3', fetchImpl: other.impl }).health()).ok).toBe(false)
   })
 
   it('health: modelo con etiqueta no coincide con otra etiqueta', async () => {
