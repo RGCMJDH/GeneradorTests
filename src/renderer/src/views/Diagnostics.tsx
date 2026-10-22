@@ -14,7 +14,13 @@ export default function Diagnostics() {
   const alive = useRef(true)
 
   const check = useCallback(async (): Promise<void> => {
-    const [h, c] = await Promise.all([window.api.system.health(), window.api.system.config()])
+    let h, c
+    try {
+      ;[h, c] = await Promise.all([window.api.system.health(), window.api.system.config()])
+    } catch {
+      if (alive.current) setHealth({ status: 'down', message: 'No se pudo comprobar el estado de Ollama.' })
+      return
+    }
     if (!alive.current) return
     if (c.ok) setModel(c.data.model)
     else if (h.ok) setModel(h.data.model)
@@ -32,8 +38,11 @@ export default function Diagnostics() {
 
   async function retry(): Promise<void> {
     setRetrying(true)
-    await check()
-    if (alive.current) setRetrying(false)
+    try {
+      await check()
+    } finally {
+      if (alive.current) setRetrying(false)
+    }
   }
 
   if (health.status === 'checking') return <p className="chip chip--idle">Comprobando Ollama…</p>

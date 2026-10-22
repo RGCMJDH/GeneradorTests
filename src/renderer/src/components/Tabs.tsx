@@ -1,10 +1,12 @@
-import { useRef, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react'
 
 export interface TabDef {
   id: string
   label: string
   content: ReactNode
 }
+
+const FOCUSABLE = 'button, [href], input, textarea, select, [tabindex]:not([tabindex="-1"])'
 
 interface Props {
   label: string
@@ -19,6 +21,16 @@ interface Props {
  */
 export function Tabs({ label, tabs, active, onChange }: Props) {
   const refs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const panels = useRef<Record<string, HTMLDivElement | null>>({})
+
+  // WAI-ARIA: un panel sin contenido enfocable (p. ej. un marcador de posición) debe poder recibir el foco él mismo.
+  useEffect(() => {
+    for (const el of Object.values(panels.current)) {
+      if (!el) continue
+      if (el.querySelector(FOCUSABLE)) el.removeAttribute('tabindex')
+      else el.tabIndex = 0
+    }
+  })
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
     const i = tabs.findIndex((t) => t.id === active)
@@ -57,7 +69,17 @@ export function Tabs({ label, tabs, active, onChange }: Props) {
         ))}
       </div>
       {tabs.map((t) => (
-        <div key={t.id} role="tabpanel" id={`panel-${t.id}`} aria-labelledby={`tab-${t.id}`} hidden={t.id !== active} className="tabs__panel">
+        <div
+          key={t.id}
+          ref={(el) => {
+            panels.current[t.id] = el
+          }}
+          role="tabpanel"
+          id={`panel-${t.id}`}
+          aria-labelledby={`tab-${t.id}`}
+          hidden={t.id !== active}
+          className="tabs__panel"
+        >
           {t.content}
         </div>
       ))}

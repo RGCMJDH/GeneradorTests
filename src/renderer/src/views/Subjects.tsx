@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import type { Subject } from '../../../shared/api'
 import { Alert } from '../components/Alert'
+import { UNEXPECTED_ERROR } from '../errors'
 
 interface Props {
   selectedId: number | null
@@ -16,14 +17,21 @@ export default function Subjects({ selectedId, onSelect }: Props) {
 
   useEffect(() => {
     let alive = true
-    void window.api.subjects.list().then((res) => {
-      if (!alive) return
-      if (res.ok) setSubjects(res.data)
-      else {
+    window.api.subjects
+      .list()
+      .then((res) => {
+        if (!alive) return
+        if (res.ok) setSubjects(res.data)
+        else {
+          setSubjects([])
+          setError(res.error)
+        }
+      })
+      .catch(() => {
+        if (!alive) return
         setSubjects([])
-        setError(res.error)
-      }
-    })
+        setError(UNEXPECTED_ERROR)
+      })
     return () => {
       alive = false
     }
@@ -35,12 +43,17 @@ export default function Subjects({ selectedId, onSelect }: Props) {
     if (!trimmed || creating) return
     setCreating(true)
     setError(null)
-    const res = await window.api.subjects.create(trimmed)
-    setCreating(false)
-    if (!res.ok) return setError(res.error)
-    setSubjects((prev) => [...(prev ?? []), res.data])
-    setName('')
-    onSelect(res.data)
+    try {
+      const res = await window.api.subjects.create(trimmed)
+      if (!res.ok) return setError(res.error)
+      setSubjects((prev) => [...(prev ?? []), res.data])
+      setName('')
+      onSelect(res.data)
+    } catch {
+      setError(UNEXPECTED_ERROR)
+    } finally {
+      setCreating(false)
+    }
   }
 
   return (

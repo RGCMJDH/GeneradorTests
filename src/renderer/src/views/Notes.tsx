@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ConfirmOcrOutcome, DocumentInfo, ImportKind } from '../../../shared/api'
 import { Alert, Busy, Status } from '../components/Alert'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { UNEXPECTED_ERROR } from '../errors'
 import { NotesChunks } from './NotesChunks'
 import { NotesDocuments } from './NotesDocuments'
 import OcrReview from './OcrReview'
@@ -23,23 +24,48 @@ const NO_TEXT_MESSAGE =
   'Este PDF no contiene texto seleccionable (probablemente es un escaneo). El OCR de esta aplicación solo funciona con imágenes, ' +
   'así que no se puede pasar un PDF por OCR directamente. Exporta sus páginas como imágenes (PNG o JPG) e impórtalas con «Importar foto».'
 
+export type Blocking = 'import' | 'ocr' | null
+
+interface Props extends TabProps {
+  /** Avisa al padre de que hay trabajo que se perdería al cambiar de asignatura (importación en curso o revisión OCR abierta). */
+  onBlockingChange?(blocking: Blocking): void
+}
+
+const fragmentos = (n: number): string => `${n} ${n === 1 ? 'fragmento' : 'fragmentos'}`
+
 /** Pestaña Apuntes: importar, documentos y visor de fragmentos. */
-export default function Notes({ subject }: TabProps) {
+export default function Notes({ subject, onBlockingChange }: Props) {
   const [docs, setDocs] = useState<DocumentInfo[]>([])
   const [busy, setBusy] = useState<ImportKind | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState('')
-  const [ocr, setOcr] = useState<{ documentId: number; text: string } | null>(null)
+  const [ocr, setOcr] = useState<{ documentId: number; text: string; missing: boolean } | null>(null)
   const [toDelete, setToDelete] = useState<DocumentInfo | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [viewing, setViewing] = useState<number | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
+  const docsHeading = useRef<HTMLHeadingElement>(null)
+  const [focusNonce, setFocusNonce] = useState(0)
   const sid = subject.id
 
+  useEffect(() => {
+    onBlockingChange?.(busy ? 'import' : ocr ? 'ocr' : null)
+  }, [busy, ocr, onBlockingChange])
+  useEffect(() => () => onBlockingChange?.(null), [onBlockingChange])
+
+  // Tras borrar/confirmar/descartar, el botón que abrió la acción ya no existe: el foco va a un destino estable.
+  useEffect(() => {
+    if (focusNonce > 0) docsHeading.current?.focus()
+  }, [focusNonce])
+
   const refresh = useCallback(async (): Promise<void> => {
-    const res = await window.api.notes.list(sid)
-    if (res.ok) setDocs(res.data)
-    else setError(res.error)
+    try {
+      const res = await window.api.notes.list(sid)
+      if (res.ok) setDocs(res.data)
+      else setError(res.error)
+    } catch {
+      setError(UNEXPECTED_ERROR)
+    }
     setReloadKey((k) => k + 1)
   }, [sid])
 
@@ -51,43 +77,56 @@ export default function Notes({ subject }: TabProps) {
     setBusy(kind)
     setError(null)
     setStatus('')
-    const res = await window.api.notes.import(sid, kind)
-    setBusy(null)
-    if (!res.ok) return setError(res.code === 'NO_TEXT' ? NO_TEXT_MESSAGE : res.error)
-    const out = res.data
-    if (out.canceled) return
-    if (out.kind === 'image') {
-      setOcr({ documentId: out.documentId, text: out.ocrText })
-    } else {
-      const n = out.document.chunkCount
-      setStatus(`«${out.document.title}» importado: ${n} ${n === 1 ? 'fragmento' : 'fragmentos'}.${out.warning ? ` Aviso: ${out.warning}` : ''}`)
+    try {
+      const res = await window.api.notes.import(sid, kind)
+      if (!res.ok) return setError(res.code === 'NO_TEXT' ? NO_TEXT_MESSAGE : res.error)
+      const out = res.data
+      if (out.canceled) return
+      if (out.kind === 'image') {
+        setOcr({ documentId: out.documentId, text: out.ocrText, missing: false })
+      } else {
+        setStatus(`«${out.document.title}» importado: ${fragmentos(out.document.chunkCount)}.${out.warning ? ` Aviso: ${out.warning}` : ''}`)
+      }
+      await refresh()
+    } catch {
+      setError(UNEXPECTED_ERROR)
+    } finally {
+      setBusy(null)
     }
-    await refresh()
   }
 
   async function onOcrConfirmed(out: ConfirmOcrOutcome): Promise<void> {
     setOcr(null)
-    setStatus(`Texto confirmado: ${out.chunkCount} ${out.chunkCount === 1 ? 'fragmento' : 'fragmentos'}.` + (out.deletedQuestions > 0 ? ` Se borraron ${out.deletedQuestions} preguntas.` : ''))
+    setStatus(`Texto confirmado: ${fragmentos(out.chunkCount)}.` + (out.deletedQuestions > 0 ? ` Se borraron ${out.deletedQuestions} preguntas.` : ''))
     setViewing(out.documentId)
     await refresh()
+    setFocusNonce((n) => n + 1)
   }
 
   async function onOcrDiscarded(): Promise<void> {
     setOcr(null)
     setStatus('Foto descartada.')
     await refresh()
+    setFocusNonce((n) => n + 1)
   }
 
   async function deleteDoc(doc: DocumentInfo): Promise<void> {
     setDeleting(true)
-    const res = await window.api.notes.deleteDocument(sid, doc.id)
-    setDeleting(false)
-    setToDelete(null)
-    if (!res.ok) return setError(res.error)
-    setError(null)
-    setStatus(`«${doc.title}» eliminado.`)
-    if (viewing === doc.id) setViewing(null)
-    await refresh()
+    try {
+      const res = await window.api.notes.deleteDocument(sid, doc.id)
+      setToDelete(null)
+      if (!res.ok) return setError(res.error)
+      setError(null)
+      setStatus(`«${doc.title}» eliminado.`)
+      if (viewing === doc.id) setViewing(null)
+      await refresh()
+      setFocusNonce((n) => n + 1)
+    } catch {
+      setToDelete(null)
+      setError(UNEXPECTED_ERROR)
+    } finally {
+      setDeleting(false)
+    }
   }
 
   return (
@@ -105,11 +144,31 @@ export default function Notes({ subject }: TabProps) {
         <Alert>{error}</Alert>
       </section>
 
-      {ocr && <OcrReview key={ocr.documentId} subjectId={sid} documentId={ocr.documentId} initialText={ocr.text} onConfirmed={(o) => void onOcrConfirmed(o)} onDiscarded={() => void onOcrDiscarded()} />}
+      {ocr && (
+        <OcrReview
+          key={ocr.documentId}
+          subjectId={sid}
+          documentId={ocr.documentId}
+          initialText={ocr.text}
+          textMissing={ocr.missing}
+          onConfirmed={(o) => void onOcrConfirmed(o)}
+          onDiscarded={() => void onOcrDiscarded()}
+        />
+      )}
 
       <section aria-labelledby="notes-docs">
-        <h3 id="notes-docs">Documentos</h3>
-        <NotesDocuments docs={docs} viewing={viewing} disabled={busy !== null} onView={setViewing} onDelete={setToDelete} />
+        <h3 id="notes-docs" ref={docsHeading} tabIndex={-1}>
+          Documentos
+        </h3>
+        <NotesDocuments
+          docs={docs}
+          viewing={viewing}
+          disabled={busy !== null}
+          reviewingId={ocr?.documentId ?? null}
+          onView={setViewing}
+          onDelete={setToDelete}
+          onResume={(d) => setOcr({ documentId: d.id, text: '', missing: true })}
+        />
       </section>
 
       <section aria-labelledby="notes-chunks">

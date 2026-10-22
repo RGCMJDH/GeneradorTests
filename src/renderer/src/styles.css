@@ -310,6 +310,9 @@ textarea {
   border: 1px solid var(--border);
   box-shadow: 0 12px 40px rgb(0 0 0 / 0.35);
 }
+.dialog:focus {
+  outline: none;
+}
 .dialog h2 {
   font-size: var(--step-1);
 }
@@ -411,6 +414,9 @@ textarea {
   background: none;
   color: var(--muted);
   cursor: pointer;
+}
+.tabs__tab:focus-visible {
+  outline-offset: -3px; /* hacia dentro: el contenedor con scroll no recorta el anillo */
 }
 .tabs__tab:hover {
   color: var(--text);
@@ -544,4 +550,14 @@ textarea {
   * {
     scroll-behavior: auto !important;
   }
+}
+
+.fatal {
+  max-width: 36rem;
+  margin: 4rem auto;
+  padding: 1.5rem;
+  border: 1px solid var(--danger);
+  border-left-width: 6px;
+  border-radius: var(--radius);
+  background: var(--danger-soft);
 }

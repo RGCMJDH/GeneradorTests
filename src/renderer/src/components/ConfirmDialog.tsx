@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useId, useRef, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 
 interface Props {
   title: string
@@ -11,42 +12,79 @@ interface Props {
   onCancel(): void
 }
 
-/** Diálogo modal de confirmación: foco inicial en Cancelar, Escape cancela, Tab no sale del diálogo. */
-export function ConfirmDialog({ title, children, confirmLabel, cancelLabel = 'Cancelar', danger, busy, onConfirm, onCancel }: Props) {
+const FOCUSABLE = 'button:not(:disabled), [href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])'
+
+/**
+ * Diálogo modal de confirmación. Se pinta en un portal bajo <body> y, mientras está abierto:
+ * el resto de la página queda `inert`; Escape cancela (salvo ocupado) y Tab/Mayús+Tab dan la vuelta dentro del diálogo,
+ * estés donde estés (los atajos van en `document`, no en el diálogo); el foco inicial es Cancelar y, al cerrar,
+ * vuelve al elemento que lo abrió si sigue existiendo.
+ */
+export function ConfirmDialog({ title, children, confirmLabel, cancelLabel = 'Cancelar', danger, busy = false, onConfirm, onCancel }: Props) {
   const titleId = useId()
   const descId = useId()
-  const cancelRef = useRef<HTMLButtonElement>(null)
+  const overlayRef = useRef<HTMLDivElement>(null)
   const boxRef = useRef<HTMLDivElement>(null)
+  const cancelRef = useRef<HTMLButtonElement>(null)
+  const latest = useRef({ busy, onCancel })
+  latest.current = { busy, onCancel }
 
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null
+    const overlay = overlayRef.current
+    const inerted: { el: Element; had: boolean }[] = []
+    for (const el of Array.from(document.body.children)) {
+      if (el === overlay || el.tagName === 'SCRIPT') continue
+      inerted.push({ el, had: el.hasAttribute('inert') })
+      el.setAttribute('inert', '')
+    }
     cancelRef.current?.focus()
-    return () => previous?.focus?.()
+
+    const onKey = (e: KeyboardEvent): void => {
+      const box = boxRef.current
+      if (!box) return
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        if (!latest.current.busy) latest.current.onCancel()
+        return
+      }
+      if (e.key !== 'Tab') return
+      const items = Array.from(box.querySelectorAll<HTMLElement>(FOCUSABLE))
+      const first = items[0]
+      const last = items[items.length - 1]
+      const active = document.activeElement
+      if (!first || !last) {
+        e.preventDefault()
+        box.focus()
+      } else if (!box.contains(active) || active === box) {
+        e.preventDefault()
+        ;(e.shiftKey ? last : first).focus()
+      } else if (e.shiftKey && active === first) {
+        e.preventDefault()
+        last.focus()
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKey, true)
+    return () => {
+      document.removeEventListener('keydown', onKey, true)
+      for (const { el, had } of inerted) if (!had) el.removeAttribute('inert')
+      if (previous?.isConnected) previous.focus()
+    }
   }, [])
 
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
-    if (e.key === 'Escape') {
-      e.stopPropagation()
-      if (!busy) onCancel()
-      return
-    }
-    if (e.key !== 'Tab') return
-    const items = Array.from(boxRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled)') ?? [])
-    if (items.length === 0) return
-    const first = items[0] as HTMLElement
-    const last = items[items.length - 1] as HTMLElement
-    if (e.shiftKey && document.activeElement === first) {
-      e.preventDefault()
-      last.focus()
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault()
-      first.focus()
-    }
-  }
+  // Si el control con foco se deshabilita (operación en curso), el foco vuelve al propio diálogo.
+  useEffect(() => {
+    const box = boxRef.current
+    const active = document.activeElement as HTMLButtonElement | null
+    if (box && (!active || !box.contains(active) || active.disabled)) box.focus()
+  }, [busy])
 
-  return (
-    <div className="overlay" onKeyDown={onKeyDown}>
-      <div ref={boxRef} className="dialog" role="alertdialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descId}>
+  return createPortal(
+    <div ref={overlayRef} className="overlay">
+      <div ref={boxRef} tabIndex={-1} className="dialog" role="alertdialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descId}>
         <h2 id={titleId}>{title}</h2>
         <div id={descId} className="dialog__body">
           {children}
@@ -60,6 +98,7 @@ export function ConfirmDialog({ title, children, confirmLabel, cancelLabel = 'Ca
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

@@ -11,7 +11,14 @@ export interface FocusRequest {
 
 interface ChunkFocus {
   request: FocusRequest | null
-  /** Muestra la pestaña Apuntes y hace scroll + resalta el fragmento. QuoteLink (Task 11) lo reutiliza. */
+  /**
+   * Muestra la pestaña Apuntes y hace scroll + resalta el fragmento. QuoteLink (Task 11) lo reutiliza.
+   *
+   * Limitación: la petición la atiende la vista Apuntes (NotesChunks) que esté MONTADA en ese momento.
+   * Las pestañas siguen montadas mientras se cambia entre ellas, pero al cambiar de asignatura Apuntes se vuelve
+   * a montar y descarta una petición anterior a su montaje (no se re-ejecuta una petición "vieja").
+   * Si el fragmento ya no existe, NotesChunks lo indica con un aviso y no deja nada resaltado.
+   */
   focusChunk(chunkId: number): void
 }
 
