@@ -3,6 +3,7 @@ import type { LlmProvider } from '@core/llm'
 import { importTextFile, importPdf, importImage, confirmOcr } from '@core/ingest'
 import { generateQuestions } from '@core/generate'
 import { gradeAnswer } from '@core/grade'
+import { extractConcepts } from '@core/graph'
 
 /** Funciones del core que usan los handlers; inyectables para probar sin LLM/OCR reales. */
 export interface CoreFns {
@@ -12,9 +13,10 @@ export interface CoreFns {
   confirmOcr: typeof confirmOcr
   generateQuestions: typeof generateQuestions
   gradeAnswer: typeof gradeAnswer
+  extractConcepts: typeof extractConcepts
 }
 
-export const realCore: CoreFns = { importTextFile, importPdf, importImage, confirmOcr, generateQuestions, gradeAnswer }
+export const realCore: CoreFns = { importTextFile, importPdf, importImage, confirmOcr, generateQuestions, gradeAnswer, extractConcepts }
 
 /** Subconjunto de `dialog.showOpenDialog` de Electron. Solo vive en main. */
 export interface DialogLike {

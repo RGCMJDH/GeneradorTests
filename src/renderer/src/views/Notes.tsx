@@ -3,6 +3,7 @@ import type { ConfirmOcrOutcome, DocumentInfo, ImportKind } from '../../../share
 import { Alert, Busy, Status } from '../components/Alert'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { UNEXPECTED_ERROR } from '../errors'
+import Concepts from './Concepts'
 import { NotesChunks } from './NotesChunks'
 import { NotesDocuments } from './NotesDocuments'
 import OcrReview from './OcrReview'
@@ -44,13 +45,14 @@ export default function Notes({ subject, onBlockingChange }: Props) {
   const [deleting, setDeleting] = useState(false)
   const [viewing, setViewing] = useState<number | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
+  const [conceptsBusy, setConceptsBusy] = useState(false)
   const docsHeading = useRef<HTMLHeadingElement>(null)
   const [focusNonce, setFocusNonce] = useState(0)
   const sid = subject.id
 
   useEffect(() => {
-    onBlockingChange?.(busy ? 'import' : ocr ? 'ocr' : null)
-  }, [busy, ocr, onBlockingChange])
+    onBlockingChange?.(busy ? 'import' : ocr ? 'ocr' : conceptsBusy ? 'concepts' : null)
+  }, [busy, ocr, conceptsBusy, onBlockingChange])
   useEffect(() => () => onBlockingChange?.(null), [onBlockingChange])
 
   // Tras borrar/confirmar/descartar, el botón que abrió la acción ya no existe: el foco va a un destino estable.
@@ -170,6 +172,8 @@ export default function Notes({ subject, onBlockingChange }: Props) {
           onResume={(d) => setOcr({ documentId: d.id, text: '', missing: true })}
         />
       </section>
+
+      <Concepts subjectId={sid} onBusyChange={setConceptsBusy} />
 
       <section aria-labelledby="notes-chunks">
         <h3 id="notes-chunks">Fragmentos</h3>

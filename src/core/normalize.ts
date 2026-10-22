@@ -11,3 +11,11 @@ export function normalize(s: string): string {
     .replace(/\s+/g, ' ')
     .trim()
 }
+
+/**
+ * ¿Aparece `term` como palabra(s) completa(s) en `text`? Ambos YA normalizados.
+ * Se rodea con espacios para respetar los límites de palabra ("cel" no está en "celula").
+ */
+export function containsTerm(normText: string, normTerm: string): boolean {
+  return normTerm !== '' && ` ${normText} `.includes(` ${normTerm} `)
+}

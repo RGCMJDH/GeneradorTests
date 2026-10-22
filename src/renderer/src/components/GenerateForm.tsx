@@ -46,6 +46,8 @@ export function GenerateForm({ subjectId, active, mode = 'test', focusFirst = fa
   const countId = `${uid}-count`
   const docId = `${uid}-doc`
   const topicId = `${uid}-topic`
+  const conceptsListId = `${uid}-concepts`
+  const topicHintId = `${uid}-topic-hint`
   const countErrorId = `${uid}-count-error`
   const firstControl = useRef<HTMLInputElement>(null)
   const [chosen, setChosen] = useState<ChoosableType>('vf')
@@ -54,6 +56,7 @@ export function GenerateForm({ subjectId, active, mode = 'test', focusFirst = fa
   const [documentId, setDocumentId] = useState('')
   const [topic, setTopic] = useState('')
   const [docs, setDocs] = useState<DocumentInfo[] | null>(null)
+  const [concepts, setConcepts] = useState<string[]>([])
   const [docsError, setDocsError] = useState<string | null>(null)
   const [countError, setCountError] = useState<string | null>(null)
 
@@ -74,6 +77,21 @@ export function GenerateForm({ subjectId, active, mode = 'test', focusFirst = fa
         } else setDocsError(res.error)
       })
       .catch(() => alive && setDocsError(UNEXPECTED_ERROR))
+    return () => {
+      alive = false
+    }
+  }, [subjectId, active])
+
+  // Sugerencias de tema: conceptos extraídos de los apuntes. Son opcionales: si faltan o fallan, el tema sigue siendo texto libre.
+  useEffect(() => {
+    if (!active) return
+    let alive = true
+    window.api.concepts
+      .list(subjectId)
+      .then((res) => {
+        if (alive && res.ok) setConcepts(res.data.map((c) => c.term))
+      })
+      .catch(() => {})
     return () => {
       alive = false
     }
@@ -147,7 +165,28 @@ export function GenerateForm({ subjectId, active, mode = 'test', focusFirst = fa
 
       <div className="genform__field">
         <label htmlFor={topicId}>Tema (opcional)</label>
-        <input id={topicId} type="text" maxLength={MAX_TOPIC} value={topic} placeholder="Por ejemplo: la membrana celular" onChange={(e) => setTopic(e.target.value)} />
+        <input
+          id={topicId}
+          type="text"
+          maxLength={MAX_TOPIC}
+          value={topic}
+          placeholder="Por ejemplo: la membrana celular"
+          list={concepts.length > 0 ? conceptsListId : undefined}
+          aria-describedby={concepts.length > 0 ? topicHintId : undefined}
+          onChange={(e) => setTopic(e.target.value)}
+        />
+        {concepts.length > 0 && (
+          <>
+            <datalist id={conceptsListId}>
+              {concepts.map((t) => (
+                <option key={t} value={t} />
+              ))}
+            </datalist>
+            <p id={topicHintId} className="muted">
+              Elige un concepto extraído de tus apuntes o escribe otro tema.
+            </p>
+          </>
+        )}
       </div>
 
       <Alert>{docsError}</Alert>

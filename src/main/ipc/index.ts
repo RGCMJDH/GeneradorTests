@@ -1,4 +1,5 @@
 import type { IpcContext, Registrar } from './context'
+import { registerConcepts } from './concepts'
 import { registerNotes } from './notes'
 import { registerQuiz } from './quiz'
 import { registerSubjects } from './subjects'
@@ -13,5 +14,6 @@ export function registerIpc(ctx: IpcContext, registrar: Registrar): void {
   registerSubjects(ctx, registrar)
   registerNotes(ctx, registrar)
   registerQuiz(ctx, registrar)
+  registerConcepts(ctx, registrar)
   registerSystem(ctx, registrar)
 }

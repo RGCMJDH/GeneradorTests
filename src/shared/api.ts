@@ -1,8 +1,8 @@
 // Contrato único entre main, preload y renderer. SIN imports de Node ni de Electron:
 // el renderer lo importa. Solo `import type` hacia core (se borra al compilar).
-import type { Chunk, Question, QuestionType, Subject } from '../core/types'
+import type { Chunk, Concept, Question, QuestionType, Subject } from '../core/types'
 
-export type { Chunk, Question, QuestionType, Subject }
+export type { Chunk, Concept, Question, QuestionType, Subject }
 
 /** Canales de petición/respuesta (ipcRenderer.invoke ↔ ipcMain.handle). Fuente única de nombres. */
 export const channels = {
@@ -20,13 +20,17 @@ export const channels = {
   quizFinishAttempt: 'quiz:finishAttempt',
   quizSubmit: 'quiz:submit',
   historyList: 'history:list',
+  conceptsList: 'concepts:list',
+  conceptsBuild: 'concepts:build',
+  conceptsCancel: 'concepts:cancel',
   systemHealth: 'system:health',
   systemConfig: 'system:config'
 } as const
 
 /** Canales de eventos main → renderer (webContents.send). No tienen handler. */
 export const events = {
-  quizProgress: 'quiz:progress'
+  quizProgress: 'quiz:progress',
+  conceptsProgress: 'concepts:progress'
 } as const
 
 export type ChannelName = (typeof channels)[keyof typeof channels]
@@ -95,6 +99,23 @@ export interface GenerateOutcome {
 export interface ProgressEvent {
   requestId: string
   done: number
+  total: number
+}
+
+export interface ConceptsBuildRequest {
+  /** Lo elige el renderer; sirve para cancelar y para filtrar eventos de progreso. */
+  requestId: string
+  subjectId: number
+  /** Solo analiza ese documento. En ese caso el resultado NO sustituye al índice guardado de la asignatura. */
+  documentId?: number
+}
+
+export interface ConceptsOutcome {
+  concepts: Concept[]
+  /** true si se canceló: entonces `concepts` es parcial y NO se ha guardado (el índice anterior se conserva). */
+  cancelled: boolean
+  /** Fragmentos analizados / fragmentos disponibles (hay un tope por ejecución). */
+  analyzed: number
   total: number
 }
 
@@ -167,6 +188,14 @@ export interface Api {
   }
   history: {
     list(subjectId: number): Promise<Result<HistoryAttempt[]>>
+  }
+  concepts: {
+    /** Índice guardado (validado contra los fragmentos actuales). */
+    list(subjectId: number): Promise<Result<Concept[]>>
+    build(req: ConceptsBuildRequest): Promise<Result<ConceptsOutcome>>
+    cancel(requestId: string): Promise<Result<{ cancelled: boolean }>>
+    /** Devuelve la función para cancelar la suscripción. */
+    onProgress(cb: (e: ProgressEvent) => void): () => void
   }
   system: {
     health(): Promise<Result<HealthDto>>

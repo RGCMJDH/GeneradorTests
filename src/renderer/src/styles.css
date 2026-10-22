@@ -798,3 +798,42 @@ legend {
   border-radius: var(--radius);
   background: var(--danger-soft);
 }
+
+/* ---- conceptos ---- */
+.concepts__list {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.chip {
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.6rem;
+  background: var(--surface);
+  color: inherit;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.chip[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.concepts__detail {
+  margin-top: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow-wrap: anywhere;
+}
+.concepts__detail p {
+  margin: 0 0 0.5rem;
+}

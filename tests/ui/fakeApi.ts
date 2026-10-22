@@ -32,6 +32,13 @@ export function installApi(over: Over = {}): Api {
       ...over.quiz
     },
     history: { list: vi.fn(() => ok([])), ...over.history },
+    concepts: {
+      list: vi.fn(() => ok([])),
+      build: vi.fn(() => ok({ concepts: [], cancelled: false, analyzed: 0, total: 0 })),
+      cancel: vi.fn(() => ok({ cancelled: true })),
+      onProgress: vi.fn(() => () => {}),
+      ...over.concepts
+    },
     system: {
       health: vi.fn(() => ok({ ok: true, message: 'Ollama listo', model: 'qwen2.5:7b' })),
       config: vi.fn(() => ok({ model: 'qwen2.5:7b' })),

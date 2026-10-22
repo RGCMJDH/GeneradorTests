@@ -2,7 +2,8 @@ import initSqlJs, { type Database, type SqlValue } from 'sql.js'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import type { Chunk, Doc, Question, Subject } from './types'
+import type { Chunk, Concept, Doc, Question, Subject } from './types'
+import { containsTerm, normalize } from './normalize'
 
 export interface AnswerRecord {
   id: number
@@ -44,6 +45,16 @@ export interface Store {
   saveAnswer(a: NewAnswer): void
   finishAttempt(id: number): void
   listAttempts(subjectId: number): Attempt[]
+  /**
+   * Sustituye (en una transacción) el índice de conceptos de la asignatura. Lanza, sin cambiar nada,
+   * si algún concepto no tiene chunks o cita un chunk que no es de esa asignatura.
+   */
+  saveConcepts(subjectId: number, concepts: Concept[]): void
+  /**
+   * Conceptos guardados, validados contra los chunks ACTUALES: se descartan los chunks borrados o cuyo texto ya no
+   * contiene el término, y los conceptos que se quedan sin ninguno. `related` solo conserva conceptos que siguen vivos.
+   */
+  listConcepts(subjectId: number): Concept[]
 }
 
 const SCHEMA = `
@@ -94,6 +105,15 @@ CREATE TABLE IF NOT EXISTS answers (
   feedback TEXT NOT NULL,
   feedback_quote TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS concepts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  subject_id INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+  term TEXT NOT NULL,
+  chunk_ids_json TEXT NOT NULL,
+  related_json TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_concepts_subject ON concepts(subject_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_subject ON chunks(subject_id, document_id, position);
 CREATE INDEX IF NOT EXISTS idx_questions_subject ON questions(subject_id);
 CREATE INDEX IF NOT EXISTS idx_questions_chunk ON questions(chunk_id);
@@ -275,6 +295,46 @@ export async function openStore(filePath?: string, opts?: { wasmDir?: string }):
     finishAttempt(id) {
       write('UPDATE attempts SET finished_at = CURRENT_TIMESTAMP WHERE id = ?', [id])
     },
+    saveConcepts(subjectId, concepts) {
+      const own = new Set(query('SELECT id FROM chunks WHERE subject_id = ?', [subjectId]).map((r) => r.id as number))
+      for (const c of concepts) {
+        if (c.chunkIds.length === 0) throw new Error(`El concepto «${c.term}» no cita ningún fragmento`)
+        const foreign = c.chunkIds.find((id) => !own.has(id))
+        if (foreign !== undefined) throw new Error(`El chunk ${foreign} no existe o no pertenece a la asignatura ${subjectId}`)
+      }
+      db.run('BEGIN')
+      try {
+        db.run('DELETE FROM concepts WHERE subject_id = ?', [subjectId])
+        for (const c of concepts) {
+          db.run('INSERT INTO concepts (subject_id, term, chunk_ids_json, related_json) VALUES (?, ?, ?, ?)', [
+            subjectId, c.term, JSON.stringify(c.chunkIds), JSON.stringify(c.related)
+          ])
+        }
+        db.run('COMMIT')
+      } catch (e) {
+        db.run('ROLLBACK')
+        throw e
+      }
+      persist() // fuera del try: un fallo de E/S no debe disparar ROLLBACK ni enmascararse
+    },
+    listConcepts(subjectId) {
+      const rows = query('SELECT * FROM concepts WHERE subject_id = ? ORDER BY id', [subjectId])
+      if (rows.length === 0) return []
+      const texts = new Map(query('SELECT id, text FROM chunks WHERE subject_id = ?', [subjectId]).map((r) => [r.id as number, normalize(r.text as string)]))
+      const live: Concept[] = []
+      for (const r of rows) {
+        const term = r.term as string
+        const norm = normalize(term)
+        const chunkIds = (JSON.parse(r.chunk_ids_json as string) as number[]).filter((id) => {
+          const t = texts.get(id)
+          return t !== undefined && containsTerm(t, norm)
+        })
+        if (chunkIds.length > 0) live.push({ term, chunkIds, related: JSON.parse(r.related_json as string) as string[] })
+      }
+      const alive = new Set(live.map((c) => c.term))
+      return live.map((c) => ({ ...c, related: c.related.filter((t) => alive.has(t)) }))
+    },
+
     listAttempts(subjectId) {
       return query('SELECT * FROM attempts WHERE subject_id = ? ORDER BY id', [subjectId]).map((r) => ({
         id: r.id as number,

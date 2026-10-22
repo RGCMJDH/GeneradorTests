@@ -1,6 +1,6 @@
 // __GT_DEV_MOCK__ — marcador para verificar que este archivo NO llega al paquete de producción.
 // `window.api` falso en memoria para previsualizar la interfaz en un navegador normal (solo `vite dev`).
-import type { Api, Chunk, DocumentInfo, GenerateOutcome, GenerateRequestDto, GradeResultDto, HistoryAttempt, ImportKind, Question, Result, Subject } from '../../shared/api'
+import type { Api, Chunk, Concept, DocumentInfo, GenerateOutcome, GenerateRequestDto, GradeResultDto, HistoryAttempt, ImportKind, Question, Result, Subject } from '../../shared/api'
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 const ok = <T>(data: T): Result<T> => ({ ok: true, data })
@@ -26,6 +26,11 @@ SAMPLE.push(OHM_EXAMPLE)
 const hasExerciseMaterial = (t: string): boolean =>
   /[\d=]/.test(t) || /\b(ejemplo|ejercicio|problema|formula|calcula)/.test(t.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase())
 
+// Vocabulario del simulador de conceptos: solo se «extrae» lo que aparece literalmente en un fragmento (como el núcleo real).
+const CONCEPT_VOCAB = ['célula', 'membrana plasmática', 'mitocondrias', 'ATP', 'respiración celular', 'ley de Ohm', 'seres vivos', '<img src=x onerror=alert(1)>']
+const norm = (t: string): string => t.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim()
+const hasTerm = (text: string, term: string): boolean => ` ${norm(text)} `.includes(` ${norm(term)} `)
+
 export function createDevMockApi(): Api {
   let nextId = 100
   const startedAt = Date.now()
@@ -41,6 +46,8 @@ export function createDevMockApi(): Api {
   const attempts: (HistoryAttempt & { subjectId: number })[] = []
   const listeners = new Set<(e: { requestId: string; done: number; total: number }) => void>()
   const cancelled = new Set<string>()
+  const conceptIndex = new Map<number, Concept[]>()
+  const conceptListeners = new Set<(e: { requestId: string; done: number; total: number }) => void>()
 
   const addDoc = (subjectId: number, title: string, sourceType: ImportKind, texts: string[]): DocumentInfo => {
     const d: DocumentInfo = { id: nextId++, subjectId, title, sourceType, chunkCount: 0 }
@@ -246,6 +253,42 @@ export function createDevMockApi(): Api {
         }
         a.answers.push({ questionId, prompt: q.prompt, type: q.type, userAnswer: answer, correct: res.correct, feedback: res.feedback, feedbackQuote: res.quote })
         return ok(res)
+      }
+    },
+    concepts: {
+      list: async (subjectId) => ok((conceptIndex.get(subjectId) ?? []).map((c) => ({ ...c }))),
+      // Un fragmento cada 700 ms con progreso; «Cancelar» devuelve lo parcial sin guardarlo (igual que main).
+      build: async ({ requestId, subjectId }) => {
+        cancelled.delete(requestId)
+        const pool = chunks.filter((c) => c.subjectId === subjectId)
+        const perChunk: Array<{ id: number; terms: string[] }> = []
+        for (let i = 0; i < pool.length; i++) {
+          await delay(700)
+          if (cancelled.has(requestId)) break
+          const c = pool[i] as Chunk
+          perChunk.push({ id: c.id, terms: CONCEPT_VOCAB.filter((t) => hasTerm(c.text, t)) })
+          conceptListeners.forEach((cb) => cb({ requestId, done: i + 1, total: pool.length }))
+        }
+        const wasCancelled = cancelled.has(requestId)
+        const byTerm = new Map<string, Concept>()
+        for (const { id, terms } of perChunk)
+          for (const term of terms) {
+            const c = byTerm.get(term) ?? { term, chunkIds: [], related: [] }
+            c.chunkIds.push(id)
+            c.related = [...new Set([...c.related, ...terms.filter((t) => t !== term)])].sort((a, b) => a.localeCompare(b, 'es'))
+            byTerm.set(term, c)
+          }
+        const concepts = [...byTerm.values()].sort((a, b) => b.chunkIds.length - a.chunkIds.length || a.term.localeCompare(b.term, 'es'))
+        if (!wasCancelled) conceptIndex.set(subjectId, concepts)
+        return ok({ concepts, cancelled: wasCancelled, analyzed: perChunk.length, total: pool.length })
+      },
+      cancel: async (requestId) => {
+        cancelled.add(requestId)
+        return ok({ cancelled: true })
+      },
+      onProgress: (cb) => {
+        conceptListeners.add(cb)
+        return () => conceptListeners.delete(cb)
       }
     },
     history: { list: async (subjectId) => ok(attempts.filter((a) => a.subjectId === subjectId).map(({ subjectId: _s, ...rest }) => ({ ...rest, answers: [...rest.answers] }))) },

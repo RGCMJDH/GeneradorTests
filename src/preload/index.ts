@@ -33,6 +33,18 @@ const api: Api = {
   history: {
     list: (subjectId) => ipcRenderer.invoke(channels.historyList, subjectId)
   },
+  concepts: {
+    list: (subjectId) => ipcRenderer.invoke(channels.conceptsList, subjectId),
+    build: (req) => ipcRenderer.invoke(channels.conceptsBuild, req),
+    cancel: (requestId) => ipcRenderer.invoke(channels.conceptsCancel, requestId),
+    onProgress: (cb) => {
+      const listener = (_e: unknown, payload: ProgressEvent): void => cb(payload)
+      ipcRenderer.on(events.conceptsProgress, listener)
+      return () => {
+        ipcRenderer.removeListener(events.conceptsProgress, listener)
+      }
+    }
+  },
   system: {
     health: () => ipcRenderer.invoke(channels.systemHealth),
     config: () => ipcRenderer.invoke(channels.systemConfig)

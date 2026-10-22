@@ -86,7 +86,8 @@ const explodingCore: CoreFns = {
   importImage: boom('importImage') as CoreFns['importImage'],
   confirmOcr: boom('confirmOcr') as CoreFns['confirmOcr'],
   generateQuestions: boom('generateQuestions') as CoreFns['generateQuestions'],
-  gradeAnswer: boom('gradeAnswer') as CoreFns['gradeAnswer']
+  gradeAnswer: boom('gradeAnswer') as CoreFns['gradeAnswer'],
+  extractConcepts: boom('extractConcepts') as CoreFns['extractConcepts']
 }
 
 const fail = (r: Result<unknown>): Failure => {
@@ -177,6 +178,16 @@ describe('validación en la frontera IPC', () => {
     ['quiz:submit', 'questionId negativo', [{ subjectId: 1, attemptId: 1, questionId: -1, answer: 'a' }]],
     ['quiz:submit', 'clave extra', [{ subjectId: 1, attemptId: 1, questionId: 1, answer: 'a', path: 'C:\\x' }]],
     ['history:list', 'subjectId string', ['1']],
+    ['concepts:list', 'subjectId negativo', [-1]],
+    ['concepts:list', 'argumentos de más', [1, 2]],
+    ['concepts:build', 'payload no objeto', ['hola']],
+    ['concepts:build', 'requestId vacío', [{ requestId: '', subjectId: 1 }]],
+    ['concepts:build', 'requestId con caracteres raros', [{ requestId: '../x', subjectId: 1 }]],
+    ['concepts:build', 'subjectId decimal', [{ requestId: 'r', subjectId: 1.5 }]],
+    ['concepts:build', 'documentId inválido', [{ requestId: 'r', subjectId: 1, documentId: 0 }]],
+    ['concepts:build', 'clave extra tipo ruta', [{ requestId: 'r', subjectId: 1, path: 'C:\\x' }]],
+    ['concepts:build', 'argumentos de más', [{ requestId: 'r', subjectId: 1 }, 'x']],
+    ['concepts:cancel', 'requestId no string', [7]],
     ['system:health', 'argumentos de más', ['x']]
   ]
 
@@ -527,6 +538,7 @@ describe('manejo de excepciones', () => {
       'quiz:generate': [{ requestId: 'r', subjectId: 1, type: 'vf', count: 1 }], 'quiz:cancel': ['r'],
       'quiz:startAttempt': [1], 'quiz:finishAttempt': [1, 1],
       'quiz:submit': [{ subjectId: 1, attemptId: 1, questionId: 1, answer: 'a' }], 'history:list': [1],
+      'concepts:list': [1], 'concepts:build': [{ requestId: 'r', subjectId: 1 }], 'concepts:cancel': ['r'],
       'system:health': [], 'system:config': []
     }
     expect(Object.keys(valid).sort()).toEqual(Object.values(channels).sort())

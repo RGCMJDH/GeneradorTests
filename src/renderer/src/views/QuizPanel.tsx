@@ -7,6 +7,7 @@ import { GenerationSummary, type Summary } from '../components/GenerationSummary
 import { QuizScore } from '../components/QuizScore'
 import { UNEXPECTED_ERROR } from '../errors'
 import { modeText, type QuizMode } from '../quizMode'
+import { newRequestId } from '../requestId'
 import { QuizRun, type Score } from './QuizRun'
 import type { Blocking, TabProps } from './types'
 
@@ -32,9 +33,6 @@ interface Job {
   cancelRequested: boolean
   off(): void
 }
-
-const newRequestId = (): string =>
-  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
 
 /** Nunca se muestra una pregunta sin id guardado ni sin cita. */
 const showable = (q: Question): boolean => q.id !== undefined && q.quote.trim() !== ''
