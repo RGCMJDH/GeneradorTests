@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mkdtempSync, rmSync, existsSync, readdirSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, existsSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openStore } from '@core/store'
@@ -131,6 +131,66 @@ describe('store', () => {
       // las claves foráneas siguen activas tras reabrir
       reopened.deleteDocument(d.id)
       expect(reopened.listChunks(s.id)).toEqual([])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  describe('guardas de coherencia entre asignaturas', () => {
+    async function setup() {
+      const store = await openStore()
+      const a = store.createSubject('A')
+      const b = store.createSubject('B')
+      const docA = store.addDocument({ subjectId: a.id, title: 'dA', sourceType: 'text' })
+      const [chunkA] = store.addChunks(docA.id, a.id, ['texto A'])
+      return { store, a, b, docA, chunkA }
+    }
+    const q = (subjectId: number, chunkId: number) => ({
+      subjectId, chunkId, type: 'vf' as const, prompt: 'p', answer: 'V', explanation: 'e', quote: 'q'
+    })
+
+    it('addChunks rechaza un documento de otra asignatura o inexistente', async () => {
+      const { store, a, b, docA } = await setup()
+      expect(() => store.addChunks(docA.id, b.id, ['x'])).toThrow(/documento/i)
+      expect(() => store.addChunks(9999, a.id, ['x'])).toThrow(/documento/i)
+      expect(store.listChunks(b.id)).toEqual([])
+      expect(store.listChunks(a.id).map((c) => c.text)).toEqual(['texto A'])
+    })
+
+    it('saveQuestion rechaza un chunk de otra asignatura o inexistente', async () => {
+      const { store, a, b, chunkA } = await setup()
+      expect(() => store.saveQuestion(q(b.id, chunkA.id))).toThrow(/chunk/i)
+      expect(() => store.saveQuestion(q(a.id, 9999))).toThrow(/chunk/i)
+      expect(store.listQuestions(a.id)).toEqual([])
+      expect(store.listQuestions(b.id)).toEqual([])
+    })
+
+    it('saveAnswer rechaza intento y pregunta de distinta asignatura o inexistentes', async () => {
+      const { store, a, b, chunkA } = await setup()
+      const question = store.saveQuestion(q(a.id, chunkA.id))
+      const attemptB = store.startAttempt(b.id)
+      const attemptA = store.startAttempt(a.id)
+      const ans = (attemptId: number, questionId: number) => ({
+        attemptId, questionId, userAnswer: 'V', correct: true, feedback: 'f', feedbackQuote: 'q'
+      })
+      expect(() => store.saveAnswer(ans(attemptB, question.id!))).toThrow(/asignatura/i)
+      expect(() => store.saveAnswer(ans(9999, question.id!))).toThrow(/intento/i)
+      expect(() => store.saveAnswer(ans(attemptA, 9999))).toThrow(/pregunta/i)
+      expect(store.listAttempts(a.id)[0].answers).toEqual([])
+      expect(store.listAttempts(b.id)[0].answers).toEqual([])
+    })
+  })
+
+  it('si falla el renombrado limpia el .tmp y relanza el error original', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'store-test-'))
+    const file = join(dir, 'datos.sqlite')
+    try {
+      const store = await openStore(file)
+      // un directorio en el destino hace fallar renameSync
+      rmSync(file, { force: true })
+      mkdirSync(file)
+      expect(() => store.createSubject('X')).toThrow()
+      expect(existsSync(`${file}.tmp`)).toBe(false)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

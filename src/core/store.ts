@@ -1,7 +1,7 @@
 import initSqlJs, { type Database, type SqlValue } from 'sql.js'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import type { Chunk, Doc, Question, Subject } from './types'
 
 export interface AnswerRecord {
@@ -115,9 +115,18 @@ export async function openStore(filePath?: string, opts?: { wasmDir?: string }):
     const bytes = db.export() // export() puede reiniciar los PRAGMA de la conexión
     db.run('PRAGMA foreign_keys = ON')
     const tmp = `${filePath}.tmp`
-    writeFileSync(tmp, bytes)
-    renameSync(tmp, filePath)
+    try {
+      writeFileSync(tmp, bytes)
+      renameSync(tmp, filePath)
+    } catch (e) {
+      try { rmSync(tmp, { force: true }) } catch { /* mejor esfuerzo */ }
+      throw e
+    }
   }
+
+  /** subject_id de una fila, o undefined si no existe (table es siempre un literal interno). */
+  const subjectOf = (table: 'documents' | 'chunks' | 'questions' | 'attempts', id: number): number | undefined =>
+    query(`SELECT subject_id AS s FROM ${table} WHERE id = ?`, [id])[0]?.s as number | undefined
 
   const query = (sql: string, params: SqlValue[] = []): Row[] => {
     const stmt = db.prepare(sql)
@@ -179,6 +188,9 @@ export async function openStore(filePath?: string, opts?: { wasmDir?: string }):
     },
 
     addChunks(documentId, subjectId, texts) {
+      if (subjectOf('documents', documentId) !== subjectId)
+        throw new Error(`El documento ${documentId} no existe o no pertenece a la asignatura ${subjectId}`)
+      let result: Chunk[]
       db.run('BEGIN')
       try {
         const base = (query('SELECT COALESCE(MAX(position) + 1, 0) AS p FROM chunks WHERE document_id = ?', [documentId])[0].p as number)
@@ -189,12 +201,13 @@ export async function openStore(filePath?: string, opts?: { wasmDir?: string }):
           return query('SELECT last_insert_rowid() AS id')[0].id as number
         })
         db.run('COMMIT')
-        persist()
-        return texts.map((text, i) => ({ id: ids[i], documentId, subjectId, position: base + i, text }))
+        result = texts.map((text, i) => ({ id: ids[i], documentId, subjectId, position: base + i, text }))
       } catch (e) {
         db.run('ROLLBACK')
         throw e
       }
+      persist() // fuera del try: un fallo de E/S no debe disparar ROLLBACK ni enmascararse
+      return result
     },
     listChunks(subjectId, documentId) {
       const rows =
@@ -215,6 +228,8 @@ export async function openStore(filePath?: string, opts?: { wasmDir?: string }):
     },
 
     saveQuestion(q) {
+      if (subjectOf('chunks', q.chunkId) !== q.subjectId)
+        throw new Error(`El chunk ${q.chunkId} no existe o no pertenece a la asignatura ${q.subjectId}`)
       const id = write(
         `INSERT INTO questions (subject_id, chunk_id, type, prompt, options_json, answer, explanation, quote)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -227,6 +242,11 @@ export async function openStore(filePath?: string, opts?: { wasmDir?: string }):
 
     startAttempt: (subjectId) => write('INSERT INTO attempts (subject_id) VALUES (?)', [subjectId]),
     saveAnswer(a) {
+      const sa = subjectOf('attempts', a.attemptId)
+      const sq = subjectOf('questions', a.questionId)
+      if (sa === undefined) throw new Error(`El intento ${a.attemptId} no existe`)
+      if (sq === undefined) throw new Error(`La pregunta ${a.questionId} no existe`)
+      if (sa !== sq) throw new Error(`El intento ${a.attemptId} y la pregunta ${a.questionId} son de distinta asignatura`)
       write(
         `INSERT INTO answers (attempt_id, question_id, user_answer, correct, feedback, feedback_quote)
          VALUES (?, ?, ?, ?, ?, ?)`,
