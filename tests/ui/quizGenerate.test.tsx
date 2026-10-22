@@ -150,7 +150,7 @@ describe('Test: progreso y cancelación', () => {
     const onBlockingChange = vi.fn()
     render(<TestTab subject={subject} onBlockingChange={onBlockingChange} />)
     await userEvent.click(screen.getByRole('button', { name: 'Generar' }))
-    await waitFor(() => expect(onBlockingChange).toHaveBeenLastCalledWith('quiz'))
+    await waitFor(() => expect(onBlockingChange).toHaveBeenLastCalledWith('generating'))
     await act(async () => gen.resolve({ ok: true, data: outcome([vfQ()]) }))
     await waitFor(() => expect(onBlockingChange).toHaveBeenLastCalledWith(null))
   })
@@ -192,6 +192,13 @@ describe('Test: resultado de la generación', () => {
     expect(screen.getByText(/2 preguntas sin cita no se muestran/)).toBeInTheDocument()
   })
 
+  it('sin preguntas, sin descartes y sin insufficient → línea genérica', async () => {
+    setup({ generate: vi.fn(() => okR(outcome([]))) })
+    await userEvent.click(screen.getByRole('button', { name: 'Generar' }))
+    expect(await screen.findByText('No se generó ninguna pregunta. Prueba otra vez o cambia el tema.')).toBeInTheDocument()
+    expect(screen.queryByText(/No hay material suficiente/)).not.toBeInTheDocument()
+  })
+
   it('el foco pasa al resultado al terminar', async () => {
     setup({ generate: vi.fn(() => okR(outcome([vfQ()]))) })
     await userEvent.click(screen.getByRole('button', { name: 'Generar' }))
@@ -231,6 +238,17 @@ describe('Test: errores', () => {
     setup({ generate: vi.fn(() => Promise.reject(new Error('boom'))) })
     await userEvent.click(screen.getByRole('button', { name: 'Generar' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(/error inesperado/)
+  })
+
+  it('un error de cancelación no sigue visible cuando la generación termina bien', async () => {
+    const gen = deferred<Awaited<ReturnType<typeof okR>>>()
+    setup({ generate: vi.fn(() => gen.promise), cancel: vi.fn(() => failR('No se pudo cancelar')) })
+    await userEvent.click(screen.getByRole('button', { name: 'Generar' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancelar' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo cancelar')
+    await act(async () => gen.resolve({ ok: true, data: outcome([vfQ()]) }))
+    await screen.findByText(/Se generó 1 pregunta/)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('ok:false de startAttempt muestra un Alert y se puede reintentar', async () => {

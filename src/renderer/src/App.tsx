@@ -78,10 +78,14 @@ export default function App() {
             setSwitchTo(null)
           }}
         >
-          {switchTo.kind === 'quiz' ? (
+          {switchTo.kind === 'generating' ? (
             <p>
-              Tienes un test en curso (generando preguntas o respondiendo). Si cambias de asignatura se cancelará la generación y las preguntas sin responder
-              quedarán fuera del intento. Las respuestas que ya enviaste se conservan en el historial como un intento sin terminar.
+              Hay una generación de preguntas en curso. Si cambias de asignatura se cancelará y no podrás hacer el test con lo generado hasta ahora.
+            </p>
+          ) : switchTo.kind === 'quiz' ? (
+            <p>
+              Tienes un test en curso. Si cambias de asignatura quedará sin terminar: las preguntas sin responder quedarán fuera del intento. Las respuestas que ya
+              enviaste se conservan en el historial como un intento sin terminar.
             </p>
           ) : switchTo.kind === 'ocr' ? (
             <p>

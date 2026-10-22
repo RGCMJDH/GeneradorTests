@@ -1,4 +1,8 @@
 import { vi } from 'vitest'
+import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import TestTab from '../../src/renderer/src/views/TestTab'
+import { doc, installApi } from './fakeApi'
 import type { GenerateOutcome, GradeResultDto, ProgressEvent, Question } from '../../src/shared/api'
 
 export const XSS = '<img src=x onerror=alert(1)>'
@@ -56,7 +60,7 @@ export const outcome = (questions: Question[], over: Partial<GenerateOutcome> = 
   ...over
 })
 
-export const okR = <T>(data: T) => Promise.resolve({ ok: true as const, data })
+export const okR = <T,>(data: T) => Promise.resolve({ ok: true as const, data })
 export const failR = (error: string) => Promise.resolve({ ok: false as const, error })
 
 /** Control manual de `onProgress` y de una generación que se resuelve a mano. */
@@ -78,4 +82,24 @@ export function deferred<T>() {
     resolve = r
   })
   return { promise, resolve }
+}
+
+/** Monta TestTab, genera con las preguntas dadas y empieza el intento. `submit` es la implementación de quiz.submit. */
+export async function beginQuiz(questions: Question[], submit: (...a: never[]) => unknown, extra: Record<string, unknown> = {}) {
+  const api = installApi({
+    notes: { list: vi.fn(() => okR([doc()])) },
+    quiz: {
+      generate: vi.fn(() => okR(outcome(questions))),
+      startAttempt: vi.fn(() => okR({ attemptId: 5 })),
+      finishAttempt: vi.fn(() => okR(null)),
+      submit: vi.fn(submit),
+      ...extra
+    } as never
+  })
+  const onShowHistory = vi.fn()
+  const view = render(<TestTab subject={{ id: 7, name: 'Biología' }} onShowHistory={onShowHistory} />)
+  await userEvent.click(screen.getByRole('button', { name: 'Generar' }))
+  await userEvent.click(await screen.findByRole('button', { name: 'Empezar el test' }))
+  await screen.findByRole('heading', { name: /^Pregunta 1 de/ })
+  return { api, onShowHistory, view }
 }

@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useId, useState } from 'react'
 import type { Question } from '../../../shared/api'
 
 export const MAX_ANSWER_CHARS = 20_000
@@ -19,14 +19,25 @@ const VF_OPTIONS = [
 export function QuestionCard({ question, value, onChange, disabled }: Props) {
   const name = useId()
   const textId = useId()
+  // Las opciones de un test pueden repetirse: la selección se identifica por posición; lo que se envía sigue siendo el texto.
+  const [picked, setPicked] = useState<number | null>(null)
   if (question.type === 'vf' || question.type === 'test') {
     const options = question.type === 'vf' ? VF_OPTIONS : (question.options ?? []).map((o) => ({ value: o, label: o }))
     return (
       <fieldset className="question" disabled={disabled}>
         <legend className="question__prompt">{question.prompt}</legend>
-        {options.map((o) => (
-          <label key={o.value} className="option">
-            <input type="radio" name={name} value={o.value} checked={value === o.value} onChange={() => onChange(o.value)} />
+        {options.map((o, i) => (
+          <label key={i} className="option">
+            <input
+              type="radio"
+              name={name}
+              value={o.value}
+              checked={question.type === 'vf' ? value === o.value : picked === i}
+              onChange={() => {
+                setPicked(i)
+                onChange(o.value)
+              }}
+            />
             <span>{o.label}</span>
           </label>
         ))}

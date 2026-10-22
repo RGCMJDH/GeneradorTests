@@ -166,8 +166,9 @@ export function createDevMockApi(): Api {
         if (a) a.finishedAt = new Date().toISOString()
         return ok(null)
       },
-      // vf/test: corrección exacta con cita verificada. desarrollo: acierta si responde algo largo; si la respuesta
-      // contiene "sin cita" simula una cita del modelo no verificada (sin insignia).
+      // vf/test: corrección exacta con cita verificada. desarrollo: acierta si responde algo largo. Variantes (como el núcleo real):
+      // "cita del modelo" → la cita del modelo no se verificó pero se muestra la guardada con la pregunta (verified:true + marcador);
+      // "sin cita" → ni siquiera la cita guardada se pudo verificar (quote vacío, verified:false, marcador).
       submit: async ({ attemptId, questionId, answer }) => {
         await delay(question(questionId)?.type === 'desarrollo' ? 1200 : 200)
         const q = question(questionId)
@@ -175,13 +176,15 @@ export function createDevMockApi(): Api {
         if (!q || !a) return fail('La pregunta o el intento no existe', 'NOT_FOUND')
         let res: GradeResultDto
         if (q.type === 'desarrollo') {
-          const unverified = answer.toLowerCase().includes('sin cita')
+          const low = answer.toLowerCase()
+          const modelUnverified = low.includes('cita del modelo')
+          const noQuote = !modelUnverified && low.includes('sin cita')
           const correct = answer.trim().length > 20
           res = {
             correct,
-            feedback: (correct ? 'Tu respuesta recoge la idea principal del fragmento.' : 'Falta desarrollar la idea principal del fragmento.') + (unverified ? ' (cita del modelo no verificada)' : ''),
-            quote: unverified ? '' : q.quote,
-            verified: !unverified
+            feedback: (correct ? 'Tu respuesta recoge la idea principal del fragmento.' : 'Falta desarrollar la idea principal del fragmento.') + (modelUnverified || noQuote ? ' (cita del modelo no verificada)' : ''),
+            quote: noQuote ? '' : q.quote,
+            verified: !noQuote
           }
         } else {
           const correct = answer.trim().toLowerCase() === q.answer.trim().toLowerCase()

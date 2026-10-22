@@ -3,30 +3,13 @@ import { describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import TestTab from '../../src/renderer/src/views/TestTab'
-import type { GradeResultDto, Question } from '../../src/shared/api'
+import type { GradeResultDto } from '../../src/shared/api'
 import { doc, installApi } from './fakeApi'
-import { deferred, devQ, failR, grade, okR, outcome, testQ, vfQ, XSS } from './quizFixtures'
+import { beginQuiz, deferred, devQ, failR, grade, okR, outcome, testQ, vfQ, XSS } from './quizFixtures'
 
 const subject = { id: 7, name: 'Biología' }
 
-async function begin(questions: Question[], submit: (...a: never[]) => unknown, extra: Record<string, unknown> = {}) {
-  const api = installApi({
-    notes: { list: vi.fn(() => okR([doc()])) },
-    quiz: {
-      generate: vi.fn(() => okR(outcome(questions))),
-      startAttempt: vi.fn(() => okR({ attemptId: 5 })),
-      finishAttempt: vi.fn(() => okR(null)),
-      submit: vi.fn(submit),
-      ...extra
-    } as never
-  })
-  const onShowHistory = vi.fn()
-  const view = render(<TestTab subject={subject} onShowHistory={onShowHistory} />)
-  await userEvent.click(screen.getByRole('button', { name: 'Generar' }))
-  await userEvent.click(await screen.findByRole('button', { name: 'Empezar el test' }))
-  await screen.findByRole('heading', { name: /^Pregunta 1 de/ })
-  return { api, onShowHistory, view }
-}
+const begin = beginQuiz
 
 const feedbackEl = () => screen.getByTestId('feedback')
 
@@ -163,14 +146,31 @@ describe('Cita y verificación', () => {
     expect(quote).toHaveTextContent('cita sin comprobar')
   })
 
-  it('verified:false con cita vacía → sin texto de cita, sin insignia, con aviso y enlace al fragmento', async () => {
+  it('verified:false con cita vacía → no se pinta bloque de cita (ni insignia ni enlace)', async () => {
     await begin([vfQ()], () => okR(grade({ verified: false, quote: '' })))
     await answerVf()
-    const quote = screen.getByLabelText('Fragmento de origen', { selector: 'aside' })
-    expect(quote.querySelector('blockquote')).toBeNull()
+    expect(screen.queryByLabelText('Fragmento de origen', { selector: 'aside' })).not.toBeInTheDocument()
     expect(screen.queryByText('Cita verificada en tus apuntes')).not.toBeInTheDocument()
-    expect(within(quote).getByText('No se pudo verificar la cita')).toBeInTheDocument()
-    expect(within(quote).getByRole('button', { name: 'Ver en apuntes' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Ver en apuntes' })).not.toBeInTheDocument()
+  })
+
+  it('marcador "(cita del modelo no verificada)" + verified:true: insignia solo en el bloque de la cita, con la línea explicativa, y el feedback sigue limpio', async () => {
+    await begin([devQ()], () => okR(grade({ feedback: 'Bien explicado. (cita del modelo no verificada)', quote: 'Las mitocondrias producen ATP', verified: true })))
+    await userEvent.type(screen.getByRole('textbox'), 'algo')
+    await userEvent.click(screen.getByRole('button', { name: 'Responder' }))
+    await screen.findByRole('region', { name: 'Corrección' })
+    const quote = screen.getByLabelText('Fragmento de origen', { selector: 'aside' })
+    const badge = within(quote).getByText('Cita verificada en tus apuntes')
+    expect(screen.getAllByText('Cita verificada en tus apuntes')).toHaveLength(1)
+    expect(feedbackEl()).not.toContainElement(badge)
+    expect(feedbackEl().textContent).toBe('Bien explicado. (cita del modelo no verificada)')
+    expect(within(quote).getByText('Esta cita es la guardada con la pregunta; la cita que propuso el modelo no se pudo verificar.')).toBeInTheDocument()
+  })
+
+  it('sin el marcador no aparece la línea explicativa', async () => {
+    await begin([vfQ()], () => okR(grade({ verified: true })))
+    await answerVf()
+    expect(screen.queryByText(/la cita que propuso el modelo/)).not.toBeInTheDocument()
   })
 
   it('"Ver en apuntes" pide enfocar el fragmento de la pregunta', async () => {

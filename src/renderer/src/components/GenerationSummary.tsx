@@ -40,6 +40,7 @@ export function GenerationSummary({ summary, starting, onStart, onBack }: Props)
           No hay material suficiente en tus apuntes para ese tema
         </p>
       )}
+      {count === 0 && discarded === 0 && !insufficient && !cancelled && <p>No se generó ninguna pregunta. Prueba otra vez o cambia el tema.</p>}
       {discarded > 0 && (
         <div className="notice" role="status">
           <p>

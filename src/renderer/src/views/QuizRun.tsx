@@ -2,12 +2,16 @@ import { useEffect, useRef, useState } from 'react'
 import type { GradeResultDto, Question } from '../../../shared/api'
 import { Alert, Busy } from '../components/Alert'
 import { Correction } from '../components/Correction'
+import { EndTestButton } from '../components/EndTestButton'
 import { QuestionCard } from '../components/QuestionCard'
 import { UNEXPECTED_ERROR } from '../errors'
 
 export interface Score {
   correct: number
+  /** Preguntas respondidas. */
   total: number
+  /** Preguntas sin responder (saltadas o no alcanzadas). */
+  unanswered: number
 }
 
 interface Props {
@@ -36,6 +40,8 @@ export function QuizRun({ subjectId, attemptId, questions, onFinished }: Props) 
   const result = results[qid]
   const last = index === questions.length - 1
   const busy = submitting || finishing
+  // Un test sin al menos 2 opciones no se puede contestar: se avisa y se puede saltar.
+  const noOptions = q.type === 'test' && (q.options ?? []).length < 2
 
   useEffect(() => {
     alive.current = true
@@ -78,12 +84,19 @@ export function QuizRun({ subjectId, attemptId, questions, onFinished }: Props) 
       const res = await window.api.quiz.finishAttempt(subjectId, attemptId)
       if (!alive.current) return
       if (!res.ok) return setError(res.error)
-      onFinished({ correct: Object.values(results).filter((r) => r.correct).length, total: questions.length })
+      const answered = Object.values(results)
+      onFinished({ correct: answered.filter((r) => r.correct).length, total: answered.length, unanswered: questions.length - answered.length })
     } catch {
       if (alive.current) setError(UNEXPECTED_ERROR)
     } finally {
       if (alive.current) setFinishing(false)
     }
+  }
+
+  /** Una pregunta que no se puede o no se quiere contestar: cuenta como no respondida. La última cierra el intento. */
+  function skip(): void {
+    if (last) void finish()
+    else next()
   }
 
   function next(): void {
@@ -98,11 +111,15 @@ export function QuizRun({ subjectId, attemptId, questions, onFinished }: Props) 
       <h3 id="quiz-heading" ref={heading} tabIndex={-1}>
         Pregunta {index + 1} de {questions.length}
       </h3>
-      <QuestionCard key={qid} question={q} value={answer} onChange={setAnswer} disabled={busy || hasResult} />
+      <QuestionCard key={qid} question={q} value={answer} onChange={setAnswer} disabled={busy || hasResult || noOptions} />
+      {noOptions && <Alert>Esta pregunta no tiene opciones válidas. Puedes saltarla.</Alert>}
       {!hasResult && (
         <div className="row">
-          <button type="button" className="btn btn--primary" disabled={busy || answer.trim() === ''} onClick={() => void submit()}>
+          <button type="button" className="btn btn--primary" disabled={busy || noOptions || answer.trim() === ''} onClick={() => void submit()}>
             Responder
+          </button>
+          <button type="button" className="btn" disabled={busy} onClick={skip}>
+            Saltar esta pregunta
           </button>
         </div>
       )}
@@ -123,6 +140,11 @@ export function QuizRun({ subjectId, attemptId, questions, onFinished }: Props) 
             )}
           </div>
         </>
+      )}
+      {!(hasResult && last) && (
+        <div className="quiz__exit">
+          <EndTestButton disabled={busy} onConfirm={() => void finish()} />
+        </div>
       )}
       {finishing && <Busy>Guardando el resultado…</Busy>}
       <p role="status" aria-live="polite" className="sr-only">

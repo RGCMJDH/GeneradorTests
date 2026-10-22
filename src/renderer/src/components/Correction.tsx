@@ -1,6 +1,9 @@
 import type { Ref } from 'react'
 import { QuoteLink } from './QuoteLink'
 
+/** Marcador que añade el corrector cuando la cita propuesta por el modelo no se pudo verificar. */
+export const MODEL_QUOTE_MARK = '(cita del modelo no verificada)'
+
 interface Props {
   correct: boolean
   /** Texto plano. Nunca lleva insignia de verificación: esa solo existe en el bloque de la cita. */
@@ -20,7 +23,7 @@ export function Correction({ correct, feedback, quote, verified, chunkId, ref }:
       <p className="correction__feedback" data-testid="feedback">
         {feedback}
       </p>
-      <QuoteLink quote={quote} verified={verified} chunkId={chunkId} />
+      <QuoteLink quote={quote} verified={verified} chunkId={chunkId} modelQuoteUnverified={feedback.includes(MODEL_QUOTE_MARK)} />
     </section>
   )
 }

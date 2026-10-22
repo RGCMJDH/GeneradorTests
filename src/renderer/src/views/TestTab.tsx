@@ -12,7 +12,7 @@ import type { Blocking, TabProps } from './types'
 interface Props extends TabProps {
   /** La pestaña está visible (el formulario recarga los documentos al mostrarse). */
   active?: boolean
-  /** Avisa de que hay un test en curso (generando o respondiendo) que se perdería al cambiar de asignatura. */
+  /** Avisa de que hay una generación o un intento en curso que se perdería al cambiar de asignatura. */
   onBlockingChange?(blocking: Blocking): void
   onShowHistory?(): void
 }
@@ -67,7 +67,7 @@ export default function TestTab({ subject, active = true, onBlockingChange, onSh
     }
   }, [])
 
-  const blocking: Blocking = phase.kind === 'generating' || phase.kind === 'taking' ? 'quiz' : null
+  const blocking: Blocking = phase.kind === 'generating' ? 'generating' : phase.kind === 'taking' ? 'quiz' : null
   useEffect(() => {
     onBlockingChange?.(blocking)
   }, [blocking, onBlockingChange])
@@ -102,6 +102,7 @@ export default function TestTab({ subject, active = true, onBlockingChange, onSh
         setReturned(true)
         return setPhase({ kind: 'form' })
       }
+      setError(null) // p. ej. un fallo de cancelación anterior: ya no aplica
       setPhase({ kind: 'summary', ...summarize(res.data, job.cancelRequested) })
     } catch {
       if (!alive.current) return
@@ -170,7 +171,7 @@ export default function TestTab({ subject, active = true, onBlockingChange, onSh
         </>
       )}
       {phase.kind === 'taking' && <QuizRun subjectId={sid} attemptId={phase.attemptId} questions={phase.questions} onFinished={(score) => setPhase({ kind: 'done', score })} />}
-      {phase.kind === 'done' && <QuizScore correct={phase.score.correct} total={phase.score.total} onRepeat={reset} onHistory={() => onShowHistory?.()} />}
+      {phase.kind === 'done' && <QuizScore correct={phase.score.correct} total={phase.score.total} unanswered={phase.score.unanswered} onRepeat={reset} onHistory={() => onShowHistory?.()} />}
     </div>
   )
 }
