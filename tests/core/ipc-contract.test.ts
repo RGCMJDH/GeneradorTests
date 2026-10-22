@@ -378,6 +378,14 @@ describe('quiz:generate / quiz:cancel', () => {
     expect(generateQuestions.mock.calls[0][1]).toEqual({ subjectId: 1, type: 'vf', count: 2 })
   })
 
+  it('acepta type "practico" y lo pasa tal cual al core', async () => {
+    const generateQuestions = vi.fn(async () => ({ questions: [], discarded: 0, reasons: ['sin material suficiente para ejercicios prácticos'], insufficient: true }))
+    const s = await setup({ core: { generateQuestions: generateQuestions as unknown as CoreFns['generateQuestions'] } })
+    const r = await s.call('quiz:generate', { requestId: 'p1', subjectId: 1, type: 'practico', count: 2, topic: 'ohm' })
+    expect(r).toEqual({ ok: true, data: { questions: [], discarded: 0, reasons: ['sin material suficiente para ejercicios prácticos'], insufficient: true } })
+    expect((generateQuestions.mock.calls[0] as unknown as unknown[])[1]).toEqual({ subjectId: 1, type: 'practico', count: 2, topic: 'ohm' })
+  })
+
   it('quiz:cancel aborta la señal del requestId correcto y libera el id', async () => {
     let started!: () => void
     const running = new Promise<void>((res) => (started = res))

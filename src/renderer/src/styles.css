@@ -516,17 +516,6 @@ textarea {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.placeholder {
-  padding: 2rem;
-  text-align: center;
-  color: var(--muted);
-  border: 2px dashed var(--border);
-  border-radius: var(--radius);
-}
-.placeholder h3 {
-  margin-top: 0;
-  color: var(--text);
-}
 
 /* ---- test e historial ---- */
 .sr-only {

@@ -506,3 +506,160 @@ describe('generateQuestions', () => {
     })
   })
 })
+
+// --------------------------------------------------- ejercicios prácticos
+
+describe('generateQuestions: practico', () => {
+  const NO_EXERCISES = 'sin material suficiente para ejercicios prácticos'
+  const EX1 = 'Ejemplo resuelto: una resistencia de 10 ohmios recorrida por 2 amperios cumple V = I · R, es decir V = 2 · 10 = 20 voltios.'
+  const EX1_QUOTE = 'V = I · R, es decir V = 2 · 10 = 20 voltios'
+  const EX2 = 'Para calcular el área de un círculo se multiplica pi por el radio al cuadrado.'
+  const EX2_QUOTE = 'Para calcular el área de un círculo se multiplica pi por el radio al cuadrado'
+  const NOEX1 = 'La mitocondria es el orgánulo encargado de producir energía en forma de ATP.'
+  const NOEX2 = 'El núcleo celular contiene el material genético de la célula.'
+
+  const exercise = (chunkId: number, extra: Record<string, unknown> = {}) => ({
+    enunciado: 'Una resistencia de 10 ohmios recorrida por 2 amperios: ¿qué tensión hay en sus extremos?',
+    respuesta: 'V = I · R = 2 · 10 = 20 voltios',
+    explicacion: 'Se aplica la ley de Ohm del fragmento.',
+    chunkId,
+    cita: EX1_QUOTE,
+    ...extra
+  })
+
+  async function make(texts: string[]) {
+    const store = await openStore()
+    const s = store.createSubject('Física')
+    const d = store.addDocument({ subjectId: s.id, title: 'tema', sourceType: 'text' })
+    const chunks = store.addChunks(d.id, s.id, texts)
+    return { store, s, chunks }
+  }
+
+  it('chunks sin números ni ejemplos → insufficient true y FakeLlm no es llamado', async () => {
+    const { store, s } = await make([NOEX1, NOEX2])
+    const llm = new FakeLlm([{}])
+    const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'practico', count: 3 })
+    expect(llm.calls).toBe(0)
+    expect(r).toEqual({ questions: [], discarded: 0, reasons: [NO_EXERCISES], insufficient: true })
+    expect(store.listQuestions(s.id)).toHaveLength(0)
+  })
+
+  it('chunk con ejemplo → pregunta práctica guardada con cita válida', async () => {
+    const { store, s, chunks } = await make([NOEX1, EX1])
+    const llm = new FakeLlm([exercise(chunks[1].id)])
+    const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'practico', count: 1 })
+    expect(r.insufficient).toBe(false)
+    expect(r.questions).toHaveLength(1)
+    expect(r.questions[0]).toMatchObject({ type: 'practico', chunkId: chunks[1].id, answer: 'V = I · R = 2 · 10 = 20 voltios', quote: EX1_QUOTE })
+    expect(store.listQuestions(s.id)).toHaveLength(1)
+    expect(store.getChunk(chunks[1].id)!.text).toContain(r.questions[0].quote)
+  })
+
+  it('mezcla: solo se envían al LLM los chunks candidatos (con dígito, "=" o palabra clave)', async () => {
+    const { store, s, chunks } = await make([NOEX1, EX1, NOEX2, EX2])
+    const llm = new FakeLlm([
+      (c: Call) =>
+        c.user.includes(EX1)
+          ? exercise(chunks[1].id, { enunciado: `Tensión ${c.n}` })
+          : exercise(chunks[3].id, { enunciado: `Área ${c.n}`, cita: EX2_QUOTE, respuesta: 'pi por el radio al cuadrado' })
+    ])
+    const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'practico', count: 4 })
+    expect(r.questions).toHaveLength(4)
+    expect(llm.calls).toBe(4)
+    for (const p of llm.prompts) {
+      expect(p.user).not.toContain(NOEX1)
+      expect(p.user).not.toContain(NOEX2)
+      expect(p.user.includes(EX1) || p.user.includes(EX2)).toBe(true)
+    }
+    expect(llm.prompts.filter((p) => p.user.includes(EX1))).toHaveLength(2)
+    expect(llm.prompts.filter((p) => p.user.includes(EX2))).toHaveLength(2)
+  })
+
+  it.each([
+    ['un dígito', 'La reacción ocurre a 37 grados en el cuerpo humano.'],
+    ['el signo =', 'La velocidad es v = d / t en el movimiento uniforme.'],
+    ['"por ejemplo"', 'Hay varios tipos de energía, por ejemplo la cinética.'],
+    ['"ejercicio" en mayúsculas', 'Este EJERCICIO trata de la fuerza.'],
+    ['"problema"', 'El Problema de las tres leyes se explica aquí.'],
+    ['"fórmula"', 'La Fórmula de la energía se explica aquí.'],
+    ['"formula" sin tilde', 'Esta formula relaciona masa y energia.'],
+    ['"calcula"', 'Se calcula la media sumando todos los valores.']
+  ])('un chunk con %s es candidato', async (_n, text) => {
+    const { store, s, chunks } = await make([text])
+    const llm = new FakeLlm([exercise(chunks[0].id, { cita: text.slice(0, 20) })])
+    await generateQuestions({ llm, store }, { subjectId: s.id, type: 'practico', count: 1 })
+    expect(llm.calls).toBe(1)
+  })
+
+  it('el prompt exige que los datos y el método aparezcan en el fragmento, y una cita literal que los contenga', async () => {
+    const { store, s, chunks } = await make([EX1])
+    const llm = new FakeLlm([exercise(chunks[0].id)])
+    await generateQuestions({ llm, store }, { subjectId: s.id, type: 'practico', count: 1 })
+    const { user } = llm.prompts[0]
+    expect(user).toMatch(/datos/i)
+    expect(user).toMatch(/método/i)
+    expect(user).toMatch(/resuelto|solución/i)
+    expect(user).toMatch(/cita/i)
+    expect(user).toContain(EX1)
+  })
+
+  it('el tema se aplica antes del filtro: tema presente solo en chunks sin datos → insufficient sin llamar al LLM', async () => {
+    const { store, s } = await make([NOEX1, EX1])
+    const llm = new FakeLlm([{}])
+    const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'practico', count: 2, topic: 'mitocondria' })
+    expect(llm.calls).toBe(0)
+    expect(r).toEqual({ questions: [], discarded: 0, reasons: [NO_EXERCISES], insufficient: true })
+  })
+
+  it('el documentId se aplica antes del filtro', async () => {
+    const { store, s } = await make([EX1])
+    const d2 = store.addDocument({ subjectId: s.id, title: 'otro', sourceType: 'text' })
+    store.addChunks(d2.id, s.id, [NOEX2])
+    const llm = new FakeLlm([{}])
+    const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'practico', count: 1, documentId: d2.id })
+    expect(llm.calls).toBe(0)
+    expect(r.insufficient).toBe(true)
+    expect(r.reasons).toEqual([NO_EXERCISES])
+  })
+
+  it('asignatura sin chunks también devuelve el motivo de ejercicios, sin llamar al LLM', async () => {
+    const store = await openStore()
+    const s = store.createSubject('Vacía')
+    const llm = new FakeLlm([{}])
+    const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'practico', count: 1 })
+    expect(llm.calls).toBe(0)
+    expect(r.reasons).toEqual([NO_EXERCISES])
+    expect(r.insufficient).toBe(true)
+  })
+
+  it.each([
+    ['cita inventada', () => ({ cita: 'La resistencia vale 99 ohmios en total' }), /cita/],
+    ['chunkId no enviado', (id: number) => ({ chunkId: id + 1 }), /chunkId/],
+    ['respuesta vacía', () => ({ respuesta: '   ' }), /vacía/],
+    ['respuesta de 4001 caracteres', () => ({ respuesta: 'x'.repeat(4001) }), /4000/]
+  ])('mantiene las validaciones: %s se descarta tras los reintentos', async (_n, extra, reason) => {
+    const { store, s, chunks } = await make([EX1])
+    const llm = new FakeLlm([exercise(chunks[0].id, extra(chunks[0].id))])
+    const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'practico', count: 1 })
+    expect(r.questions).toHaveLength(0)
+    expect(r.discarded).toBe(1)
+    expect(r.reasons[0]).toMatch(reason)
+    expect(llm.calls).toBe(3)
+    expect(store.listQuestions(s.id)).toHaveLength(0)
+  })
+
+  it('una respuesta de exactamente 4000 caracteres se acepta', async () => {
+    const { store, s, chunks } = await make([EX1])
+    const llm = new FakeLlm([exercise(chunks[0].id, { respuesta: 'x'.repeat(4000) })])
+    const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'practico', count: 1 })
+    expect(r.questions).toHaveLength(1)
+  })
+
+  it('desarrollo no se filtra: sigue enviando chunks sin datos', async () => {
+    const { store, s, chunks } = await make([NOEX1])
+    const llm = new FakeLlm([good(chunks[0].id)])
+    const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'desarrollo', count: 1 })
+    expect(llm.calls).toBe(1)
+    expect(r.questions).toHaveLength(1)
+  })
+})

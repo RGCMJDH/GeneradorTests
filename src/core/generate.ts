@@ -23,6 +23,8 @@ export interface GenerateResult {
 const MAX_RETRIES = 2
 const MAX_COUNT = 50
 const NO_MATERIAL = 'sin material suficiente'
+const NO_EXERCISES = 'sin material suficiente para ejercicios prácticos'
+const MAX_PRACTICAL_ANSWER = 4000
 
 // ---------------------------------------------------------------- prompts
 
@@ -39,7 +41,12 @@ const TYPE_INSTRUCTIONS: Record<QuestionType, string> = {
   vf: 'una afirmación de verdadero o falso. "enunciado" es la afirmación; "respuesta" es exactamente "verdadero" o "falso".',
   test: 'una pregunta tipo test. "opciones" es un array de exactamente 4 textos distintos; "respuesta" es el texto exacto de la opción correcta.',
   desarrollo: 'una pregunta de desarrollo. "respuesta" es la respuesta modelo, basada solo en el texto.',
-  practico: 'un ejercicio práctico. "respuesta" es la solución, basada solo en el texto.'
+  practico: [
+    'un ejercicio práctico: un problema cuyos DATOS y cuyo MÉTODO de resolución aparecen ambos en el fragmento.',
+    '"enunciado" plantea el problema con sus datos, tomados del fragmento; "respuesta" es la solución resuelta (método y resultado) tal como figura en el fragmento.',
+    'No inventes datos, valores ni pasos. Si el fragmento no contiene a la vez los datos y el método, responde {"sin_material":true}.',
+    'La "cita" debe ser un pasaje literal del fragmento que contenga los datos o el método.'
+  ].join(' ')
 }
 
 const FORMAT_FIELDS = (type: QuestionType): string =>
@@ -109,14 +116,20 @@ function parseResponse(raw: unknown, type: QuestionType, sentChunkId: number): P
     if (match === undefined) return fail('la respuesta no coincide con ninguna opción')
     return { ok: true, value: { ...base, options, answer: match } }
   }
-  // desarrollo (y practico, provisionalmente igual; su filtro numérico llega en otra tarea)
+  // desarrollo y práctico: respuesta libre no vacía (en el práctico, acotada)
   if (answer === '') return fail('la respuesta está vacía')
+  if (type === 'practico' && answer.length > MAX_PRACTICAL_ANSWER) return fail(`la respuesta supera los ${MAX_PRACTICAL_ANSWER} caracteres`)
   return { ok: true, value: { ...base, answer } }
 }
 
 // ------------------------------------------------------------- generación
 
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+
+// Un ejercicio práctico necesita datos o un ejemplo resuelto: dígitos, "=" o palabras de ejercicio/fórmula.
+// "=" se mira en el texto original porque normalize() borra la puntuación.
+const EXERCISE_WORDS = /\b(ejemplo|ejercicio|problema|formula|calcula)/
+const hasExerciseMaterial = (text: string): boolean => /[\d=]/.test(text) || EXERCISE_WORDS.test(normalize(text))
 
 function selectChunks(store: Store, req: GenerateRequest): Chunk[] {
   let chunks = store.listChunks(req.subjectId, req.documentId).filter((c) => c.subjectId === req.subjectId)
@@ -125,6 +138,7 @@ function selectChunks(store: Store, req: GenerateRequest): Chunk[] {
     // Un tema solo de puntuación normaliza a '' y no casa con nada (no equivale a "sin filtro").
     chunks = topic === '' ? [] : chunks.filter((c) => normalize(c.text).includes(topic))
   }
+  if (req.type === 'practico') chunks = chunks.filter((c) => hasExerciseMaterial(c.text))
   return chunks
 }
 
@@ -140,7 +154,8 @@ export async function generateQuestions(
   }
   const chunks = selectChunks(store, req)
   if (chunks.length === 0) {
-    return { questions: [], discarded: 0, reasons: [NO_MATERIAL], insufficient: true }
+    // Sin llamar al modelo. Para práctico el motivo es específico: faltan datos o ejemplos resueltos.
+    return { questions: [], discarded: 0, reasons: [req.type === 'practico' ? NO_EXERCISES : NO_MATERIAL], insufficient: true }
   }
 
   const total = Math.min(req.count, MAX_COUNT)

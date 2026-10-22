@@ -1,6 +1,8 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useId, useRef } from 'react'
+import { modeText, type QuizMode } from '../quizMode'
 
 interface Props {
+  mode?: QuizMode
   correct: number
   /** Preguntas respondidas (las saltadas o sin responder no cuentan). */
   total: number
@@ -11,22 +13,24 @@ interface Props {
 }
 
 /** Nota final del intento y los siguientes pasos. */
-export function QuizScore({ correct, total, unanswered = 0, onRepeat, onHistory }: Props) {
+export function QuizScore({ mode = 'test', correct, total, unanswered = 0, onRepeat, onHistory }: Props) {
+  const text = modeText(mode)
+  const titleId = useId()
   const heading = useRef<HTMLHeadingElement>(null)
   useEffect(() => heading.current?.focus(), [])
   return (
-    <section className="card" aria-labelledby="quiz-score-title">
-      <h3 id="quiz-score-title" ref={heading} tabIndex={-1} style={{ marginTop: 0 }}>
-        Test terminado
+    <section className="card" aria-labelledby={titleId}>
+      <h3 id={titleId} ref={heading} tabIndex={-1} style={{ marginTop: 0 }}>
+        {text.scoreTitle}
       </h3>
       <p className="score">
         {correct} de {total}
         {unanswered > 0 && ' respondidas'}
       </p>
-      {unanswered > 0 && <p className="muted">{unanswered === 1 ? '1 pregunta sin responder' : `${unanswered} preguntas sin responder`}.</p>}
+      {unanswered > 0 && <p className="muted">{text.unanswered(unanswered)}.</p>}
       <div className="row">
         <button type="button" className="btn btn--primary" onClick={onRepeat}>
-          Repetir con otras preguntas
+          {text.repeat}
         </button>
         <button type="button" className="btn" onClick={onHistory}>
           Ver historial

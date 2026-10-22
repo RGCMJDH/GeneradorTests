@@ -56,7 +56,7 @@ export function QuestionCard({ question, value, onChange, disabled }: Props) {
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="Escribe tu respuesta con tus propias palabras…"
+        placeholder={question.type === 'practico' ? 'Escribe tu resolución con los datos y los pasos…' : 'Escribe tu respuesta con tus propias palabras…'}
       />
     </div>
   )

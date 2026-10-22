@@ -14,12 +14,13 @@ import type { Blocking } from './views/types'
 export default function App() {
   const [subject, setSubject] = useState<Subject | null>(null)
   const [tab, setTab] = useState('notes')
-  // Trabajo sin terminar: importación en curso / revisión OCR (Apuntes) o test en curso (Test). Cambiar de asignatura lo perdería.
+  // Trabajo sin terminar: importación en curso / revisión OCR (Apuntes) o test / ejercicios en curso. Cambiar de asignatura lo perdería.
   const [notesBlocking, setNotesBlocking] = useState<Blocking>(null)
   const [quizBlocking, setQuizBlocking] = useState<Blocking>(null)
-  const blocking = quizBlocking ?? notesBlocking
+  const [exercisesBlocking, setExercisesBlocking] = useState<Blocking>(null)
+  const blocking = quizBlocking ?? exercisesBlocking ?? notesBlocking
   // Se guarda también el motivo del bloqueo en el momento de pedir el cambio: el texto del diálogo no cambia si el trabajo termina mientras está abierto.
-  const [switchTo, setSwitchTo] = useState<{ to: Subject; kind: Blocking } | null>(null)
+  const [switchTo, setSwitchTo] = useState<{ to: Subject; kind: Blocking; exercises: boolean } | null>(null)
   // "Ver fragmento" desde cualquier pestaña trae primero la pestaña Apuntes.
   const revealNotes = useCallback(() => setTab('notes'), [])
   const showHistory = useCallback(() => setTab('history'), [])
@@ -27,10 +28,10 @@ export default function App() {
   const trySelect = useCallback(
     (next: Subject) => {
       if (next.id === subject?.id) return
-      if (blocking) setSwitchTo({ to: next, kind: blocking })
+      if (blocking) setSwitchTo({ to: next, kind: blocking, exercises: quizBlocking === null && exercisesBlocking !== null })
       else setSubject(next)
     },
-    [subject, blocking]
+    [subject, blocking, quizBlocking, exercisesBlocking]
   )
 
   return (
@@ -57,7 +58,7 @@ export default function App() {
                 tabs={[
                   { id: 'notes', label: 'Apuntes', content: <Notes subject={subject} onBlockingChange={setNotesBlocking} /> },
                   { id: 'test', label: 'Test', content: <TestTab subject={subject} active={tab === 'test'} onBlockingChange={setQuizBlocking} onShowHistory={showHistory} /> },
-                  { id: 'exercises', label: 'Ejercicios', content: <ExercisesTab subject={subject} /> },
+                  { id: 'exercises', label: 'Ejercicios', content: <ExercisesTab subject={subject} active={tab === 'exercises'} onBlockingChange={setExercisesBlocking} onShowHistory={showHistory} /> },
                   { id: 'history', label: 'Historial', content: <HistoryTab subject={subject} active={tab === 'history'} /> }
                 ]}
               />
@@ -80,7 +81,14 @@ export default function App() {
         >
           {switchTo.kind === 'generating' ? (
             <p>
-              Hay una generación de preguntas en curso. Si cambias de asignatura se cancelará y no podrás hacer el test con lo generado hasta ahora.
+              {switchTo.exercises
+                ? 'Hay una generación de ejercicios en curso. Si cambias de asignatura se cancelará y no podrás hacer los ejercicios con lo generado hasta ahora.'
+                : 'Hay una generación de preguntas en curso. Si cambias de asignatura se cancelará y no podrás hacer el test con lo generado hasta ahora.'}
+            </p>
+          ) : switchTo.kind === 'quiz' && switchTo.exercises ? (
+            <p>
+              Tienes unos ejercicios en curso. Si cambias de asignatura quedarán sin terminar: los ejercicios sin responder quedarán fuera del intento. Las respuestas
+              que ya enviaste se conservan en el historial como un intento sin terminar.
             </p>
           ) : switchTo.kind === 'quiz' ? (
             <p>

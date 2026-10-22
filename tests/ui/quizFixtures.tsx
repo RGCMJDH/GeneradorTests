@@ -44,6 +44,18 @@ export const devQ = (over: Partial<Question> = {}): Question => ({
   ...over
 })
 
+export const practicoQ = (over: Partial<Question> = {}): Question => ({
+  id: 4,
+  subjectId: 7,
+  chunkId: 14,
+  type: 'practico',
+  prompt: 'Una resistencia de 10 ohmios recorrida por 2 amperios: ¿qué tensión hay en sus extremos?',
+  answer: 'V = I · R = 2 · 10 = 20 voltios',
+  explanation: 'Ley de Ohm.',
+  quote: 'V = I · R = 2 · 10 = 20 voltios',
+  ...over
+})
+
 export const grade = (over: Partial<GradeResultDto> = {}): GradeResultDto => ({
   correct: true,
   feedback: 'Correcto. Está en el fragmento.',

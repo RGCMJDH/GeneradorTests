@@ -1,6 +1,6 @@
 // __GT_DEV_MOCK__ — marcador para verificar que este archivo NO llega al paquete de producción.
 // `window.api` falso en memoria para previsualizar la interfaz en un navegador normal (solo `vite dev`).
-import type { Api, Chunk, DocumentInfo, GradeResultDto, HistoryAttempt, ImportKind, Question, Result, Subject } from '../../shared/api'
+import type { Api, Chunk, DocumentInfo, GenerateOutcome, GenerateRequestDto, GradeResultDto, HistoryAttempt, ImportKind, Question, Result, Subject } from '../../shared/api'
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 const ok = <T>(data: T): Result<T> => ({ ok: true, data })
@@ -17,6 +17,14 @@ const SAMPLE = [
   'Texto de prueba con marcado, que debe verse literal y no ejecutarse: <img src=x onerror=alert(1)> y <b>no negrita</b>.',
   'Las mitocondrias producen la mayor parte del ATP mediante la respiración celular. Se consideran las centrales energéticas de la célula.'
 ]
+
+// Fragmento con datos y método resueltos: es el que da material de verdad a los ejercicios prácticos del simulador.
+const OHM_EXAMPLE = 'Ejemplo resuelto: una resistencia de 10 ohmios recorrida por una corriente de 2 amperios. Por la ley de Ohm, V = I · R = 2 · 10 = 20 voltios.'
+const OHM_QUOTE = 'Por la ley de Ohm, V = I · R = 2 · 10 = 20 voltios.'
+SAMPLE.push(OHM_EXAMPLE)
+// Mismo criterio que el núcleo: dígito, «=» o una palabra de ejercicio/fórmula.
+const hasExerciseMaterial = (t: string): boolean =>
+  /[\d=]/.test(t) || /\b(ejemplo|ejercicio|problema|formula|calcula)/.test(t.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase())
 
 export function createDevMockApi(): Api {
   let nextId = 100
@@ -44,6 +52,50 @@ export function createDevMockApi(): Api {
     for (let i = chunks.length - 1; i >= 0; i--) if (chunks[i]?.documentId === d.id) chunks.splice(i, 1)
     texts.forEach((text, position) => chunks.push({ id: nextId++, documentId: d.id, subjectId: d.subjectId, position, text }))
     d.chunkCount = texts.length
+  }
+
+  // Simula la generación de ejercicios prácticos: máx. 2, con cita literal que contiene los datos y el método.
+  const generatePractical = async (req: GenerateRequestDto, pool: Chunk[]): Promise<Result<GenerateOutcome>> => {
+    const topic = req.topic?.trim().toLowerCase() ?? ''
+    const candidates = pool.filter((c) => hasExerciseMaterial(c.text) && (topic === '' || c.text.toLowerCase().includes(topic)))
+    candidates.sort((x, y) => Number(y.text === OHM_EXAMPLE) - Number(x.text === OHM_EXAMPLE))
+    if (topic.includes('poesía') || candidates.length === 0) {
+      await delay(500)
+      return ok({ questions: [], discarded: 0, reasons: ['sin material suficiente para ejercicios prácticos'], insufficient: true })
+    }
+    cancelled.delete(req.requestId)
+    const made = Math.min(req.count, candidates.length, 2)
+    const out: Question[] = []
+    for (let i = 0; i < made; i++) {
+      await delay(900)
+      listeners.forEach((cb) => cb({ requestId: req.requestId, done: i, total: req.count }))
+      if (cancelled.has(req.requestId)) break
+      const c = candidates[i] as Chunk
+      const ohm = c.text === OHM_EXAMPLE
+      const quote = ohm ? OHM_QUOTE : (c.text.split(/(?<=\.)\s/)[0] ?? c.text)
+      const q: Question = {
+        id: nextId++,
+        subjectId: req.subjectId,
+        chunkId: c.id,
+        type: 'practico',
+        prompt: ohm
+          ? 'Una resistencia de 10 ohmios recorrida por una corriente de 2 amperios: ¿qué tensión hay entre sus extremos? Resuélvelo con el método de tus apuntes.'
+          : `Resuelve con los datos de tus apuntes: «${quote.split(' ').slice(0, 10).join(' ')}…»`,
+        answer: ohm ? 'V = I · R = 2 · 10 = 20 voltios' : quote,
+        explanation: 'Los datos y el método están en el fragmento citado.',
+        quote
+      }
+      questionsById.set(q.id as number, q)
+      out.push(q)
+    }
+    if (!cancelled.has(req.requestId)) listeners.forEach((cb) => cb({ requestId: req.requestId, done: made, total: req.count }))
+    const dropped = cancelled.has(req.requestId) ? 0 : req.count - made
+    return ok({
+      questions: out,
+      discarded: dropped,
+      reasons: Array.from({ length: dropped }, (_, k) => `Ejercicio ${made + k + 1}: la cita no aparece literalmente en el fragmento`),
+      insufficient: false
+    })
   }
 
   return {
@@ -102,8 +154,10 @@ export function createDevMockApi(): Api {
     quiz: {
       // Genera (como mucho) 3 preguntas de tipos distintos con citas literales de los fragmentos de la asignatura.
       // Tema "física cuántica" → sin material. Con más de 3 preguntas pedidas, el resto sale como descartadas.
+      // Ejercicios prácticos (type 'practico'): solo con fragmentos con datos/ejemplos; el tema «poesía» no tiene → sin material.
       generate: async (req) => {
         const pool = chunks.filter((c) => c.subjectId === req.subjectId && (req.documentId === undefined || c.documentId === req.documentId))
+        if (req.type === 'practico') return generatePractical(req, pool)
         if (req.topic?.toLowerCase().includes('física cuántica') || pool.length === 0) {
           await delay(500)
           return ok({ questions: [], discarded: 0, reasons: [], insufficient: true })
@@ -170,12 +224,12 @@ export function createDevMockApi(): Api {
       // "cita del modelo" → la cita del modelo no se verificó pero se muestra la guardada con la pregunta (verified:true + marcador);
       // "sin cita" → ni siquiera la cita guardada se pudo verificar (quote vacío, verified:false, marcador).
       submit: async ({ attemptId, questionId, answer }) => {
-        await delay(question(questionId)?.type === 'desarrollo' ? 1200 : 200)
+        await delay(question(questionId)?.type === 'desarrollo' || question(questionId)?.type === 'practico' ? 1200 : 200)
         const q = question(questionId)
         const a = attempts.find((x) => x.id === attemptId)
         if (!q || !a) return fail('La pregunta o el intento no existe', 'NOT_FOUND')
         let res: GradeResultDto
-        if (q.type === 'desarrollo') {
+        if (q.type === 'desarrollo' || q.type === 'practico') {
           const low = answer.toLowerCase()
           const modelUnverified = low.includes('cita del modelo')
           const noQuote = !modelUnverified && low.includes('sin cita')

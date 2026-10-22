@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { GradeResultDto, Question } from '../../../shared/api'
 import { Alert, Busy } from '../components/Alert'
 import { Correction } from '../components/Correction'
 import { EndTestButton } from '../components/EndTestButton'
 import { QuestionCard } from '../components/QuestionCard'
 import { UNEXPECTED_ERROR } from '../errors'
+import { modeText, type QuizMode } from '../quizMode'
 
 export interface Score {
   correct: number
@@ -15,6 +16,7 @@ export interface Score {
 }
 
 interface Props {
+  mode?: QuizMode
   subjectId: number
   attemptId: number
   /** Solo preguntas con id y cita (las filtra TestTab). */
@@ -23,7 +25,9 @@ interface Props {
 }
 
 /** Un intento: una pregunta cada vez, corrección inmediata y, al final, cierre del intento. */
-export function QuizRun({ subjectId, attemptId, questions, onFinished }: Props) {
+export function QuizRun({ mode = 'test', subjectId, attemptId, questions, onFinished }: Props) {
+  const text = modeText(mode)
+  const headingId = useId()
   const [index, setIndex] = useState(0)
   const [answer, setAnswer] = useState('')
   const [results, setResults] = useState<Record<number, GradeResultDto>>({})
@@ -107,9 +111,9 @@ export function QuizRun({ subjectId, attemptId, questions, onFinished }: Props) 
   }
 
   return (
-    <section className="quiz" aria-labelledby="quiz-heading">
-      <h3 id="quiz-heading" ref={heading} tabIndex={-1}>
-        Pregunta {index + 1} de {questions.length}
+    <section className="quiz" aria-labelledby={headingId}>
+      <h3 id={headingId} ref={heading} tabIndex={-1}>
+        {text.itemTitle} {index + 1} de {questions.length}
       </h3>
       <QuestionCard key={qid} question={q} value={answer} onChange={setAnswer} disabled={busy || hasResult || noOptions} />
       {noOptions && <Alert>Esta pregunta no tiene opciones válidas. Puedes saltarla.</Alert>}
@@ -119,11 +123,11 @@ export function QuizRun({ subjectId, attemptId, questions, onFinished }: Props) 
             Responder
           </button>
           <button type="button" className="btn" disabled={busy} onClick={skip}>
-            Saltar esta pregunta
+            {text.skip}
           </button>
         </div>
       )}
-      {submitting && <Busy>{q.type === 'desarrollo' ? 'Corrigiendo tu respuesta… puede tardar un poco.' : 'Corrigiendo…'}</Busy>}
+      {submitting && <Busy>{q.type === 'desarrollo' || q.type === 'practico' ? 'Corrigiendo tu respuesta… puede tardar un poco.' : 'Corrigiendo…'}</Busy>}
       <Alert>{error}</Alert>
       {result && (
         <>
@@ -143,7 +147,7 @@ export function QuizRun({ subjectId, attemptId, questions, onFinished }: Props) 
       )}
       {!(hasResult && last) && (
         <div className="quiz__exit">
-          <EndTestButton disabled={busy} onConfirm={() => void finish()} />
+          <EndTestButton mode={mode} disabled={busy} onConfirm={() => void finish()} />
         </div>
       )}
       {finishing && <Busy>Guardando el resultado…</Busy>}

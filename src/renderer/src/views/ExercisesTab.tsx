@@ -1,7 +1,15 @@
-import Placeholder from './Placeholder'
-import type { TabProps } from './types'
+import QuizPanel from './QuizPanel'
+import type { Blocking, TabProps } from './types'
 
-// Task 11 sustituye este marcador por la vista real de Ejercicios.
-export default function ExercisesTab(_props: TabProps) {
-  return <Placeholder title="Ejercicios" />
+interface Props extends TabProps {
+  /** La pestaña está visible (el formulario recarga los documentos al mostrarse). */
+  active?: boolean
+  /** Avisa de que hay una generación o un intento en curso que se perdería al cambiar de asignatura. */
+  onBlockingChange?(blocking: Blocking): void
+  onShowHistory?(): void
+}
+
+/** Pestaña Ejercicios: ejercicios prácticos (tipo fijo 'practico') sobre datos y ejemplos resueltos de los apuntes. */
+export default function ExercisesTab(props: Props) {
+  return <QuizPanel {...props} mode="exercises" />
 }
