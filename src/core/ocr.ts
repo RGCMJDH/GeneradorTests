@@ -1,6 +1,7 @@
 import { open, readFile, stat } from 'node:fs/promises'
 import { basename } from 'node:path'
 import { createWorker } from 'tesseract.js'
+import { detectImageType } from './imageType'
 
 export interface OcrOptions {
   /** Origen de los datos de idioma (por defecto el CDN de tesseract.js, solo para desarrollo/tests). */
@@ -17,26 +18,6 @@ export interface OcrOptions {
 
 const DEFAULT_LOAD_TIMEOUT_MS = 120_000
 const DEFAULT_RECOGNIZE_TIMEOUT_MS = 180_000
-
-const startsWith = (b: Buffer, sig: number[], at = 0): boolean => sig.every((v, i) => b[at + i] === v)
-
-/** Cabeceras de los formatos que Tesseract/Leptonica sabe leer (PNG, JPEG, GIF, BMP, TIFF, WebP). */
-function looksLikeImage(b: Buffer): boolean {
-  return (
-    startsWith(b, [0x89, 0x50, 0x4e, 0x47]) ||
-    startsWith(b, [0xff, 0xd8, 0xff]) ||
-    startsWith(b, [0x47, 0x49, 0x46, 0x38]) ||
-    startsWith(b, [0x42, 0x4d]) ||
-    startsWith(b, [0x49, 0x49, 0x2a, 0x00]) ||
-    startsWith(b, [0x4d, 0x4d, 0x00, 0x2a]) ||
-    (startsWith(b, [0x52, 0x49, 0x46, 0x46]) && startsWith(b, [0x57, 0x45, 0x42, 0x50], 8))
-  )
-}
-
-/** Contenedor ISO-BMFF de HEIC/HEIF: caja 'ftyp' en los bytes 4-8 y marca en los 8-12. */
-function isHeic(b: Buffer): boolean {
-  return startsWith(b, [0x66, 0x74, 0x79, 0x70], 4) && ['heic', 'heix', 'hevc', 'mif1', 'heif'].includes(b.toString('latin1', 8, 12))
-}
 
 /** Valida existencia y formato ANTES de arrancar el worker (que es caro y puede descargar datos de idioma). */
 async function assertReadableImage(path: string): Promise<void> {
@@ -63,8 +44,9 @@ async function assertReadableImage(path: string): Promise<void> {
   } catch (e) {
     return fail((e as Error).message)
   }
-  if (read >= 12 && isHeic(head)) throw new Error('Formato HEIC/HEIF no soportado: exporta la foto como JPG o PNG.')
-  if (read < 4 || !looksLikeImage(head)) fail('no es una imagen válida (usa PNG, JPG, BMP, GIF, TIFF o WebP)')
+  const kind = detectImageType(head.subarray(0, read))
+  if (kind === 'heic') throw new Error('Formato HEIC/HEIF no soportado: exporta la foto como JPG o PNG.')
+  if (kind === null) fail('no es una imagen válida (usa PNG, JPG, BMP, GIF, TIFF o WebP)')
 }
 
 type Worker = Awaited<ReturnType<typeof createWorker>>
