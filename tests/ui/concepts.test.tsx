@@ -72,7 +72,7 @@ describe('Conceptos', () => {
     expect(onBusyChange).toHaveBeenLastCalledWith(true)
     d.resolve(await okC(outcome([ADN, RIBO])))
     expect(await screen.findByRole('list', { name: 'Conceptos' })).toBeInTheDocument()
-    expect(await screen.findByText(/2 conceptos extraídos de 3 fragmentos/)).toBeInTheDocument()
+    expect(await screen.findByText(/Índice: 2 conceptos \(se analizaron 3 fragmentos\)/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Extraer conceptos' })).toBeEnabled()
     expect(onBusyChange).toHaveBeenLastCalledWith(false)
   })

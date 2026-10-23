@@ -111,7 +111,7 @@ export default function Concepts({ subjectId, docs = [], onBusyChange }: Props) 
         setConcepts(out.concepts)
         setSelected(null)
         const n = out.concepts.length
-        const parts = [`${n} ${n === 1 ? 'concepto extraído' : 'conceptos extraídos'} de ${fragmentos(out.analyzed)}.`]
+        const parts = [`Índice: ${n} ${n === 1 ? 'concepto' : 'conceptos'} (${out.analyzed === 1 ? 'se analizó' : 'se analizaron'} ${fragmentos(out.analyzed)}).`]
         if (out.failed > 0)
           parts.push(`${out.failed} ${out.failed === 1 ? 'fragmento no se pudo analizar' : 'fragmentos no se pudieron analizar'} (puedes volver a extraer para reintentarlos).`)
         if (out.analyzed < out.total)

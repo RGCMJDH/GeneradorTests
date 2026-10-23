@@ -18,14 +18,17 @@ export function registerConcepts(ctx: IpcContext, r: Registrar): void {
   /** Asignaturas con una extracción en curso: dos a la vez solo gastarían CPU y se pisarían al guardar. */
   const busy = new Set<number>()
 
-  /** Guarda el resultado según el alcance; devuelve el índice resultante. Lanza STALE si los apuntes cambiaron. */
-  const persist = (subjectId: number, documentId: number | undefined, fresh: Concept[], replaced: Set<number>): Concept[] => {
+  /**
+   * Guarda el resultado; devuelve el índice resultante. Lanza STALE si los apuntes cambiaron.
+   * `full` (toda la asignatura, todos los chunks analizados con éxito) sustituye el índice; en cualquier otro caso
+   * (un documento, fallos o presupuesto agotado) se MEZCLA: solo se reemplaza lo analizado con éxito en esta ejecución.
+   */
+  const persist = (subjectId: number, full: boolean, fresh: Concept[], replaced: Set<number>): Concept[] => {
     try {
-      if (documentId === undefined) {
+      if (full) {
         store.saveConcepts(subjectId, fresh)
         return fresh
       }
-      // Un documento concreto se mezcla con el índice: solo se reemplaza lo que acaba de analizarse con éxito.
       const order = new Map(store.listChunks(subjectId).map((c, i) => [c.id, i]))
       const merged = mergeConcepts(store.listConcepts(subjectId), fresh, replaced, order)
       store.saveConcepts(subjectId, merged)
@@ -83,7 +86,8 @@ export function registerConcepts(ctx: IpcContext, r: Registrar): void {
       const existing = store.listConcepts(subjectId)
       if (failed > 0 && concepts.length === 0 && existing.length > 0) return outcome(existing, false)
       const replaced = new Set(processed.filter((c) => !failedIds.has(c)))
-      return outcome(persist(subjectId, documentId, concepts, replaced), false)
+      const full = documentId === undefined && analyzed === total && failed === 0
+      return outcome(persist(subjectId, full, concepts, replaced), false)
     } finally {
       running.delete(reqId)
       busy.delete(subjectId)

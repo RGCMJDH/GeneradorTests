@@ -36,6 +36,13 @@ describe('Conceptos: fallos del modelo', () => {
     expect(screen.getByRole('list', { name: 'Conceptos' })).toBeInTheDocument()
   })
 
+  it('el estado dice el tamaño del índice y cuántos fragmentos se analizaron (singular incluido)', async () => {
+    installApi({ concepts: { build: vi.fn(() => okC(outcome([ADN], { analyzed: 1, total: 1 }))) } })
+    renderConcepts()
+    await userEvent.click(await screen.findByRole('button', { name: 'Extraer conceptos' }))
+    expect(await screen.findByText(/Índice: 1 concepto \(se analizó 1 fragmento\)/)).toBeInTheDocument()
+  })
+
   it('con un solo fallo usa el singular y sin fallos no menciona nada', async () => {
     const build = vi.fn().mockResolvedValueOnce({ ok: true, data: outcome([ADN], { failed: 1 }) }).mockResolvedValue({ ok: true, data: outcome([ADN]) })
     installApi({ concepts: { build } })
@@ -62,7 +69,7 @@ describe('Conceptos: fallos del modelo', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Extraer conceptos' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(/el modelo no respondió/)
     expect(screen.getByRole('button', { name: /^ADN/ })).toBeInTheDocument()
-    expect(screen.queryByText(/0 conceptos extraídos/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Índice: 0 conceptos/)).not.toBeInTheDocument()
   })
 })
 
@@ -97,7 +104,7 @@ describe('Conceptos: selector de documento', () => {
     await screen.findByRole('button', { name: /^ribosomas/ })
     await userEvent.selectOptions(selector(), 'Tema 1')
     await userEvent.click(screen.getByRole('button', { name: 'Extraer conceptos' }))
-    await screen.findByText(/2 conceptos extraídos/)
+    await screen.findByText(/Índice: 2 conceptos \(se analizó 1 fragmento\)/)
     expect(screen.getByRole('button', { name: /^ribosomas/ })).toBeInTheDocument()
   })
 
