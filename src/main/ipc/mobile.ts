@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import { rmSync } from 'node:fs'
 import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import QRCode from 'qrcode'
@@ -51,8 +52,9 @@ export function registerMobile(ctx: IpcContext, r: Registrar): { dispose(): Prom
   let session: Session | null = null
   // Cola de OCR: estrictamente una foto a la vez (el temporal espera en disco hasta que le toca; se borra en runOcr).
   let ocrChain: Promise<unknown> = Promise.resolve()
-  let pendingOcr = 0
-  let generation = 0 // sube en dispose(): lo que seguía en cola se descarta
+  let pendingOcr = 0 // plazas reservadas: desde que se acepta una foto (antes de escribirla) hasta que termina su OCR
+  const queuedPaths = new Set<string>() // temporales cuyo OCR aún no ha empezado
+  let runningPath: string | null = null
   // start/stop se encadenan: nunca hay dos servidores a la vez aunque lleguen peticiones simultáneas.
   let chain: Promise<unknown> = Promise.resolve()
   const serial = <T>(fn: () => Promise<T>): Promise<T> => {
@@ -67,14 +69,34 @@ export function registerMobile(ctx: IpcContext, r: Registrar): { dispose(): Prom
     await s.server.stop()
   }
 
+  /**
+   * Borra YA (síncrono: se llama al salir de la app, donde no hay más turnos de promesas) los temporales en cola y el que se está procesando,
+   * y hace que la cola no los arranque. «Detener» NO llama a esto: las fotos ya aceptadas se procesan.
+   */
+  function purgeQueue(): void {
+    for (const p of [...queuedPaths, ...(runningPath ? [runningPath] : [])]) {
+      try {
+        rmSync(p, { force: true })
+      } catch {
+        /* mejor esfuerzo */
+      }
+    }
+    queuedPaths.clear()
+  }
+
   /** Para la sesión si la ventana desaparece o se recarga (la interfaz ya no podría mostrarla ni detenerla). */
   function attach(s: Session): void {
     const gone = (): void => void serial(() => (session === s ? close(s) : Promise.resolve())).catch(() => undefined)
+    // Ventana destruida: los resultados ya no tienen a quién llegar, así que tampoco se conservan las fotos en cola.
+    const destroyed = (): void => {
+      purgeQueue()
+      gone()
+    }
     s.detach()
-    s.sender.once?.('destroyed', gone)
+    s.sender.once?.('destroyed', destroyed)
     s.sender.on?.('did-start-loading', gone)
     s.detach = () => {
-      s.sender.removeListener?.('destroyed', gone)
+      s.sender.removeListener?.('destroyed', destroyed)
       s.sender.removeListener?.('did-start-loading', gone)
     }
   }
@@ -93,11 +115,19 @@ export function registerMobile(ctx: IpcContext, r: Registrar): { dispose(): Prom
     trySend({ sender: s.sender() }, events.mobileImage, payload)
   }
 
+  /** La plaza (pendingOcr) ya está reservada; se libera cuando el trabajo termina o se descarta. */
   function enqueueOcr(s: { subjectId: number; sender: () => SenderLike }, path: string): void {
-    const gen = generation
-    pendingOcr++
+    queuedPaths.add(path)
     ocrChain = ocrChain
-      .then(() => (gen === generation ? runOcr(s, path) : rm(path, { force: true })))
+      .then(async () => {
+        if (!queuedPaths.delete(path)) return // purgado al salir: su archivo ya no existe
+        runningPath = path
+        try {
+          await runOcr(s, path)
+        } finally {
+          runningPath = null
+        }
+      })
       .catch(() => undefined)
       .finally(() => {
         pendingOcr--
@@ -108,11 +138,21 @@ export function registerMobile(ctx: IpcContext, r: Registrar): { dispose(): Prom
     const kind = detectImageType(data)
     if (kind === null || kind === 'heic') throw new Error('Formato de imagen no válido.')
     if (pendingOcr >= MAX_PENDING_OCR) throw new UploadRejected(429, QUEUE_FULL) // antes de escribir nada en disco
-    await mkdir(inbox, { recursive: true })
+    pendingOcr++ // reserva SÍNCRONA, antes de cualquier await: subidas simultáneas no pueden pasar todas la comprobación
+    let queued = false
     // Nombre generado aquí: nada de lo que envía el móvil (nombre, tipo) forma parte de la ruta.
     const path = join(inbox, `foto-movil-${randomBytes(8).toString('hex')}.${EXTENSION[kind]}`)
-    await writeFile(path, data, { flag: 'wx' })
-    enqueueOcr(s, path)
+    try {
+      await mkdir(inbox, { recursive: true })
+      await writeFile(path, data, { flag: 'wx' })
+      enqueueOcr(s, path)
+      queued = true
+    } finally {
+      if (!queued) {
+        pendingOcr--
+        await rm(path, { force: true }).catch(() => undefined)
+      }
+    }
   }
 
   async function start(subjectId: number, sender: SenderLike): Promise<MobileSession> {
@@ -167,10 +207,11 @@ export function registerMobile(ctx: IpcContext, r: Registrar): { dispose(): Prom
   })
 
   return {
-    dispose: () =>
-      serial(async () => {
-        generation++
+    dispose: () => {
+      purgeQueue() // primero lo síncrono: tras esto el proceso puede terminar en cualquier momento
+      return serial(async () => {
         if (session) await close(session)
       })
+    }
   }
 }

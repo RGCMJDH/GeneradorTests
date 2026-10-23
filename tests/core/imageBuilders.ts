@@ -33,7 +33,24 @@ export const jpeg = (w: number, h: number, total = 0, sof = 0xc0): Buffer =>
     total
   )
 
-export const gif = (w: number, h: number, total = 0): Buffer => pad(Buffer.concat([Buffer.from('GIF89a'), u16le(w), u16le(h), Buffer.from([0, 0, 0])]), total)
+/**
+ * GIF: pantalla lógica (w x h) + descriptor de imagen. `frame` = tamaño del fotograma si difiere de la pantalla lógica (un GIF puede
+ * declarar 1x1 y llevar un fotograma enorme); `extras` añade tabla de colores global y extensiones (control gráfico y comentario) antes del descriptor;
+ * `noFrame` omite el descriptor (cabecera sin ningún fotograma).
+ */
+export const gif = (w: number, h: number, total = 0, opts: { frame?: { w: number; h: number }; extras?: boolean; noFrame?: boolean } = {}): Buffer => {
+  const frame = opts.frame ?? { w, h }
+  const lsd = Buffer.from([opts.extras ? 0x80 : 0, 0, 0]) // con extras: tabla global de 2 colores (6 bytes)
+  const extras = opts.extras
+    ? Buffer.concat([
+        Buffer.alloc(6, 7), // tabla de colores global
+        Buffer.from([0x21, 0xf9, 4, 0, 0, 0, 0, 0]), // control gráfico
+        Buffer.from([0x21, 0xfe, 3, 0x61, 0x62, 0x63, 0]) // comentario
+      ])
+    : Buffer.alloc(0)
+  const descriptor = opts.noFrame ? Buffer.alloc(0) : Buffer.concat([Buffer.from([0x2c, 0, 0, 0, 0]), u16le(frame.w), u16le(frame.h), Buffer.from([0])])
+  return pad(Buffer.concat([Buffer.from('GIF89a'), u16le(w), u16le(h), lsd, extras, descriptor]), total)
+}
 
 /** BMP con BITMAPFILEHEADER (14) + BITMAPINFOHEADER (40); `dib` 12 = BITMAPCOREHEADER (u16). Alto negativo = fila superior primero. */
 export const bmp = (w: number, h: number, opts: { dib?: number; negativeHeight?: boolean; total?: number } = {}): Buffer => {

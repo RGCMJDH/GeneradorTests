@@ -19,8 +19,10 @@ export interface OcrOptions {
 const DEFAULT_LOAD_TIMEOUT_MS = 120_000
 const DEFAULT_RECOGNIZE_TIMEOUT_MS = 180_000
 
+const HEAD_BYTES = 32
+
 /** Valida existencia y formato ANTES de arrancar el worker (que es caro y puede descargar datos de idioma). */
-async function assertReadableImage(path: string): Promise<void> {
+export async function assertReadableImage(path: string): Promise<void> {
   const name = basename(path)
   const fail = (why: string): never => {
     throw new Error(`No se pudo leer la imagen «${name}»: ${why}.`)
@@ -32,7 +34,8 @@ async function assertReadableImage(path: string): Promise<void> {
     return fail((e as NodeJS.ErrnoException).code === 'ENOENT' ? 'el archivo no existe' : (e as Error).message)
   }
   if (!isFile) return fail('no es un archivo')
-  const head = Buffer.alloc(12)
+  // 32 bytes: la firma de un BMP no se confirma hasta el campo de tamaño de su cabecera DIB (offset 14..18); WebP/HEIC piden 12.
+  const head = Buffer.alloc(HEAD_BYTES)
   let read = 0
   try {
     const fh = await open(path, 'r')

@@ -34,6 +34,17 @@ describe('tamaño en píxeles (antes de llegar a onImage / al OCR)', () => {
     expect(s.spy).not.toHaveBeenCalled()
   })
 
+  it('un GIF que declara 1x1 pero lleva un fotograma de 20000x20000 se rechaza; uno normal se acepta', async () => {
+    const s = await start()
+    const r = await upload(s, gif(1, 1, 100, { frame: { w: 20000, h: 20000 } }), 'image/gif')
+    expect(r.status).toBe(413)
+    expect(r.text).toBe(BIG_MESSAGE)
+    expect((await upload(s, gif(1, 1, 100, { frame: { w: 65535, h: 65535 } }), 'image/gif')).status).toBe(413)
+    expect((await upload(s, gif(640, 480, 200, { extras: true }), 'image/gif')).status).toBe(200)
+    expect((await upload(s, gif(10, 10, 0, { noFrame: true }), 'image/gif')).status).toBe(415) // sin fotograma legible
+    expect(s.spy).toHaveBeenCalledTimes(1)
+  })
+
   it('cada lado se limita a 12000 aunque el área sea pequeña', async () => {
     const s = await start()
     expect((await upload(s, png(12001, 10))).status).toBe(413)

@@ -480,4 +480,81 @@ describe('OCR de fotos del móvil: una a la vez', () => {
     await tick()
     expect(probe.spy).toHaveBeenCalledTimes(1)
   })
+
+  it('dispose() borra de forma síncrona los temporales en cola y su OCR no llega a empezar; el que corre se limpia al terminar', async () => {
+    const probe = serialProbe()
+    const s = await setup({ importImage: probe.importImage })
+    const subj = s.store.createSubject('A')
+    await s.call(channels.mobileStart, { subjectId: subj.id })
+    for (const n of ['a', 'b', 'c']) await s.servers[0]!.opts.onImage(FOTO, `${n}.png`)
+    await vi.waitFor(() => expect(probe.calls).toHaveLength(1))
+    const running = probe.calls[0]!.path
+    const queued = files(s.inbox).filter((f) => join(s.inbox, f) !== running)
+    expect(queued).toHaveLength(2)
+    void s.ipc.dispose() // sin await: lo que debe estar hecho ya es la purga, no el cierre del servidor
+    for (const f of queued) expect(existsSync(join(s.inbox, f)), f).toBe(false)
+    expect(existsSync(running)).toBe(false) // el que corre también se borra, como mejor esfuerzo
+    probe.calls[0]!.finish('x')
+    await tick()
+    await tick()
+    expect(probe.spy).toHaveBeenCalledTimes(1)
+    expect(files(s.inbox)).toEqual([])
+    expect(s.sent.every((m) => m.channel === events.mobileImage)).toBe(true)
+  })
+
+  it('al destruirse la ventana también se purgan los temporales en cola', async () => {
+    const probe = serialProbe()
+    const s = await setup({ importImage: probe.importImage })
+    const subj = s.store.createSubject('A')
+    await s.call(channels.mobileStart, { subjectId: subj.id })
+    for (const n of ['a', 'b', 'c']) await s.servers[0]!.opts.onImage(FOTO, `${n}.png`)
+    await vi.waitFor(() => expect(probe.calls).toHaveLength(1))
+    s.emit('destroyed')
+    expect(files(s.inbox)).toEqual([])
+    probe.calls[0]!.finish('x')
+    await tick()
+    expect(probe.spy).toHaveBeenCalledTimes(1)
+  })
+
+  it('Detener (parar la sesión) deja que la cola se vacíe: las fotos ya aceptadas se procesan', async () => {
+    const probe = serialProbe()
+    const s = await setup({ importImage: probe.importImage })
+    const subj = s.store.createSubject('A')
+    await s.call(channels.mobileStart, { subjectId: subj.id })
+    for (const n of ['a', 'b', 'c']) await s.servers[0]!.opts.onImage(FOTO, `${n}.png`)
+    await s.call(channels.mobileStop)
+    expect(files(s.inbox)).toHaveLength(3)
+    for (let i = 0; i < 3; i++) {
+      await vi.waitFor(() => expect(probe.calls.length).toBeGreaterThan(i))
+      probe.calls[i]!.finish(`t${i}`)
+    }
+    await vi.waitFor(() => expect(s.sent).toHaveLength(3))
+    expect(files(s.inbox)).toEqual([])
+  })
+
+  it('8 recepciones concurrentes con el OCR bloqueado: como mucho 5 aceptadas, el resto 429', async () => {
+    const probe = serialProbe()
+    const s = await setup({ importImage: probe.importImage })
+    const subj = s.store.createSubject('A')
+    await s.call(channels.mobileStart, { subjectId: subj.id })
+    const results = await Promise.allSettled(Array.from({ length: 8 }, (_, i) => s.servers[0]!.opts.onImage(FOTO, `${i}.png`)))
+    const ok = results.filter((r) => r.status === 'fulfilled')
+    const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+    expect(ok).toHaveLength(5)
+    expect(rejected).toHaveLength(3)
+    for (const r of rejected) expect(r.reason).toMatchObject({ name: 'UploadRejected', status: 429 })
+    expect(files(s.inbox)).toHaveLength(5)
+  })
+
+  it('si falla la escritura del temporal se libera la plaza reservada', async () => {
+    const probe = serialProbe()
+    const s = await setup({ importImage: probe.importImage })
+    const subj = s.store.createSubject('A')
+    await s.call(channels.mobileStart, { subjectId: subj.id })
+    // Un archivo donde debería estar la carpeta de entrada hace fallar mkdir/writeFile.
+    rmSync(s.inbox, { recursive: true, force: true })
+    writeFileSync(s.inbox, 'no soy una carpeta')
+    for (let i = 0; i < 7; i++) await expect(s.servers[0]!.opts.onImage(FOTO, `${i}.png`)).rejects.not.toMatchObject({ name: 'UploadRejected' })
+    expect(s.servers[0]!.opts.checkCapacity!()).toBeNull()
+  })
 })

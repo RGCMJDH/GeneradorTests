@@ -54,6 +54,34 @@ function jpegSize(b: Buffer): ImageSize | null {
   return null
 }
 
+/**
+ * El tamaño que cuenta es el del FOTOGRAMA que se decodificará, no solo el de la pantalla lógica: un GIF puede declarar 1x1 y llevar
+ * un descriptor de imagen de hasta 65535x65535. Se salta la tabla de colores global y las extensiones hasta el primer descriptor (0x2C)
+ * y se usa el mayor de cada dimensión. Sin descriptor dentro del buffer (o con demasiados bloques) no hay tamaño verificable.
+ */
+function gifSize(b: Buffer): ImageSize | null {
+  if (b.length < 13) return null
+  const packed = b[10]!
+  let i = 13 + (packed & 0x80 ? 3 * 2 ** ((packed & 7) + 1) : 0)
+  let steps = 0
+  while (steps++ < 1_000) {
+    if (i >= b.length) return null
+    if (b[i] === 0x2c) {
+      if (i + 10 > b.length) return null
+      return valid(Math.max(b.readUInt16LE(6), b.readUInt16LE(i + 5)), Math.max(b.readUInt16LE(8), b.readUInt16LE(i + 7)))
+    }
+    if (b[i] !== 0x21) return null // fin del archivo (0x3B) o basura
+    i += 2 // introductor + etiqueta; siguen sub-bloques [longitud, datos...] hasta una longitud 0
+    for (;;) {
+      if (steps++ > 1_000 || i >= b.length) return null
+      const length = b[i]!
+      i += 1 + length
+      if (length === 0) break
+    }
+  }
+  return null
+}
+
 function webpSize(b: Buffer): ImageSize | null {
   const kind = b.toString('latin1', 12, 16)
   if (kind === 'VP8 ' && b.length >= 30 && startsWith(b, [0x9d, 0x01, 0x2a], 23)) return valid(b.readUInt16LE(26) & 0x3fff, b.readUInt16LE(28) & 0x3fff)
@@ -99,7 +127,7 @@ export function readImageSize(b: Buffer): ImageSize | null {
       case 'jpeg':
         return jpegSize(b)
       case 'gif':
-        return b.length >= 10 ? valid(b.readUInt16LE(6), b.readUInt16LE(8)) : null
+        return gifSize(b)
       case 'bmp': {
         if (b.readUInt32LE(14) === 12) return b.length >= 22 ? valid(b.readUInt16LE(18), b.readUInt16LE(20)) : null
         return b.length >= 26 ? valid(Math.abs(b.readInt32LE(18)), Math.abs(b.readInt32LE(22))) : null

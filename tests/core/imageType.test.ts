@@ -11,6 +11,24 @@ describe('readImageSize', () => {
   })
   it('JPEG sin SOF (truncado) -> null', () => expect(readImageSize(jpeg(10, 10).subarray(0, 18))).toBeNull())
   it('GIF (pantalla lógica)', () => expect(readImageSize(gif(640, 480))).toEqual({ width: 640, height: 480 }))
+  it('GIF: toma el mayor entre la pantalla lógica y el descriptor del primer fotograma', () => {
+    expect(readImageSize(gif(1, 1, 100, { frame: { w: 20000, h: 20000 } }))).toEqual({ width: 20000, height: 20000 })
+    expect(readImageSize(gif(800, 600, 0, { frame: { w: 100, h: 700 } }))).toEqual({ width: 800, height: 700 })
+  })
+  it('GIF con tabla de colores global y extensiones antes del fotograma', () => {
+    expect(readImageSize(gif(300, 200, 0, { extras: true }))).toEqual({ width: 300, height: 200 })
+    expect(readImageSize(gif(1, 1, 0, { extras: true, frame: { w: 65535, h: 65535 } }))).toEqual({ width: 65535, height: 65535 })
+  })
+  it('GIF sin descriptor de imagen (o truncado antes de él) -> null', () => {
+    expect(readImageSize(gif(10, 10, 0, { noFrame: true }))).toBeNull()
+    expect(readImageSize(gif(10, 10, 0, { extras: true }).subarray(0, 20))).toBeNull()
+    expect(readImageSize(gif(10, 10).subarray(0, 18))).toBeNull() // descriptor cortado
+  })
+  it('GIF con una cadena interminable de extensiones -> null sin colgarse', () => {
+    const ext = Buffer.from([0x21, 0xfe, 1, 0x41, 0])
+    const many = Buffer.concat([gif(10, 10, 0, { noFrame: true }), ...Array.from({ length: 5000 }, () => ext)])
+    expect(readImageSize(many)).toBeNull()
+  })
   it('BMP: INFOHEADER, alto negativo y CORE header', () => {
     expect(readImageSize(bmp(300, 200))).toEqual({ width: 300, height: 200 })
     expect(readImageSize(bmp(300, 200, { negativeHeight: true }))).toEqual({ width: 300, height: 200 })
