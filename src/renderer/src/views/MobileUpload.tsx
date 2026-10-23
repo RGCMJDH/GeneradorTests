@@ -60,7 +60,11 @@ export default function MobileUpload({ subjectId, onPhoto, onActiveChange }: Pro
 
   useEffect(() => {
     const offImage = window.api.mobile.onImage((e) => {
-      if (e.subjectId !== subjectId) return // foto de otra asignatura (sesión anterior): se ignora
+      if (e.subjectId !== subjectId) {
+        // Foto de una sesión anterior (otra asignatura): no se abre aquí, pero se avisa de dónde quedó.
+        setNotice('error' in e ? 'Llegó una foto para otra asignatura y no se pudo procesar.' : 'Llegó una foto para otra asignatura; quedó guardada como «Sin trocear» en esa asignatura.')
+        return
+      }
       if ('error' in e) return setError(`La foto recibida del móvil no se pudo procesar. ${e.error}`)
       setNotice('Foto recibida del móvil: revisa el texto reconocido antes de trocearlo.')
       latest.current.onPhoto({ documentId: e.documentId, text: e.ocrText })
@@ -148,7 +152,7 @@ export default function MobileUpload({ subjectId, onPhoto, onActiveChange }: Pro
             Si no puedes escanear, escribe esta dirección en el navegador del móvil: <code className="mobile__url">{session.url}</code>
           </p>
           <p role="note" className="notice">
-            Cualquiera en tu red con este enlace podría enviar fotos mientras esté activo. Se desactiva solo a los 10 minutos o al pulsar Detener.
+            Cualquiera en tu red con este enlace podría enviar fotos mientras esté activo. Se desactiva solo a los 10 minutos o al pulsar Detener. La foto viaja sin cifrar por tu wifi; usa solo redes de confianza.
           </p>
           <p className="muted">Si el móvil no conecta, permite a la app en el Firewall de Windows (redes privadas).</p>
           <p role="timer" aria-live="off">

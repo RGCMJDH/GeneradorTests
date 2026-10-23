@@ -4,7 +4,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { networkInterfaces as osNetworkInterfaces, type NetworkInterfaceInfo } from 'node:os'
 import type { Socket } from 'node:net'
-import { detectImageType } from './imageType'
+import { detectImageType, readImageSize } from './imageType'
 import { renderUploadPage } from './mobilePage'
 import { pickLanAddress, sanitizeFilename } from './mobileUtil'
 
@@ -25,10 +25,28 @@ export interface UploadServerOptions {
   maxUploads?: number
   /** Plazo total para recibir cabeceras y cuerpo (anti-slowloris); por defecto 30 s. */
   requestTimeoutMs?: number
+  /** Tope de píxeles (ancho x alto, leídos de la cabecera) antes de aceptar la foto; por defecto 40 millones. */
+  maxPixels?: number
+  /**
+   * Se consulta ANTES de leer el cuerpo: si devuelve un texto, la subida se rechaza con 429 y ese texto
+   * (p. ej. cola de OCR llena). Null/undefined = hay sitio.
+   */
+  checkCapacity?: () => string | null
   /** Se llama una vez si el servidor se apaga por caducidad (no por stop()). */
   onExpire?: () => void
   /** Solo para pruebas. */
   networkInterfaces?: () => NodeJS.Dict<NetworkInterfaceInfo[]>
+}
+
+/** `onImage` lanza esto para rechazar con un estado y un texto propios (p. ej. 429 si hay demasiadas fotos esperando OCR). */
+export class UploadRejected extends Error {
+  constructor(
+    readonly status: 413 | 415 | 429 | 503,
+    message: string
+  ) {
+    super(message)
+    this.name = 'UploadRejected'
+  }
 }
 
 export interface UploadServer {
@@ -45,10 +63,19 @@ const DEFAULT_MAX_UPLOADS = 20
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 /** Cada subida en vuelo retiene hasta maxBytes en memoria. */
 const MAX_IN_FLIGHT = 4
+const DEFAULT_MAX_PIXELS = 40_000_000
+/** Lado máximo aunque el área sea pequeña (una tira de 1 x 40 M de píxeles también agotaría memoria). */
+const MAX_SIDE = 12_000
+/** El móvil espera como mucho esto por la cabecera; el plazo total del cuerpo lo marca nuestro temporizador, no el de Node. */
+const HEADERS_TIMEOUT_MS = 15_000
+/** Margen de Node por encima de nuestro temporizador: así el 408 en español llega al móvil antes de que Node corte. */
+const NODE_TIMEOUT_MARGIN_MS = 5_000
 
 const NO_NETWORK = 'No se encontró una red local (wifi)'
 const HEIC_MESSAGE = 'Formato HEIC no soportado: en el móvil elige JPG/Más compatible'
 const ALLOWED_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif', 'image/bmp', 'image/tiff', 'application/octet-stream'])
+const TOO_BIG_PIXELS = 'La foto es demasiado grande (resolución). Reduce la calidad de la cámara.'
+const BUSY = 'El ordenador está procesando otras fotos; espera un momento y vuelve a intentarlo.'
 const HEIC_TYPES = new Set(['image/heic', 'image/heif', 'image/heic-sequence', 'image/heif-sequence'])
 
 /** Comparación en tiempo constante: buffers de igual longitud (la longitud del token es pública: 32). */
@@ -126,6 +153,8 @@ export async function startUploadServer(opts: UploadServerOptions): Promise<Uplo
   const ttlMs = opts.ttlMs ?? DEFAULT_TTL_MS
   const maxUploads = opts.maxUploads ?? DEFAULT_MAX_UPLOADS
   const timeoutMs = opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+  const maxPixels = opts.maxPixels ?? DEFAULT_MAX_PIXELS
+  const headersTimeoutMs = Math.min(HEADERS_TIMEOUT_MS, timeoutMs)
 
   // Nunca se escucha en todas las interfaces: o una IP concreta o error.
   const host = opts.host ?? pickLanAddress((opts.networkInterfaces ?? osNetworkInterfaces)())
@@ -138,9 +167,16 @@ export async function startUploadServer(opts: UploadServerOptions): Promise<Uplo
   const uploadPath = `${pagePath}/upload`
   let accepted = 0 // subidas completadas con éxito
   let inFlight = 0
+  let announcedHost = '' // «ip:puerto» que se anuncia en la URL; se fija al empezar a escuchar
 
   /** 'page' | 'upload' si el token es válido; null para CUALQUIER otra cosa (mismo 404 vacío). */
-  const route = (rawUrl: string | undefined): 'page' | 'upload' | null => {
+  const route = (r: IncomingMessage): 'page' | 'upload' | null => {
+    // Solo se atiende por la dirección anunciada: un Host distinto (DNS rebinding, proxy, navegador ajeno) no recibe nada.
+    if ((r.headers.host ?? '').toLowerCase() !== announcedHost) return null
+    // Un POST iniciado desde otra web (cross-site/same-site) nunca es del propio formulario del móvil.
+    const fetchSite = r.headers['sec-fetch-site']
+    if (r.method === 'POST' && fetchSite !== undefined && fetchSite !== 'same-origin' && fetchSite !== 'none') return null
+    const rawUrl = r.url
     const q = (rawUrl ?? '').indexOf('?')
     const path = q < 0 ? (rawUrl ?? '') : (rawUrl ?? '').slice(0, q)
     const seg = path.split('/')
@@ -156,7 +192,10 @@ export async function startUploadServer(opts: UploadServerOptions): Promise<Uplo
     if (!ALLOWED_TYPES.has(type)) return rejectAndDrain(r, res, 415, 'Solo se admiten imágenes (PNG, JPG, WebP, GIF, BMP o TIFF).')
     const declared = r.headers['content-length']
     if (declared !== undefined && (!/^\d+$/.test(declared) || Number(declared) > maxBytes)) return rejectAndDrain(r, res, 413, 'La foto es demasiado grande.')
-    if (accepted + inFlight >= maxUploads || inFlight >= MAX_IN_FLIGHT) return rejectAndDrain(r, res, 429, 'Demasiadas fotos enviadas en esta sesión.')
+    const full = opts.checkCapacity?.()
+    if (full) return rejectAndDrain(r, res, 429, full)
+    if (inFlight >= MAX_IN_FLIGHT) return rejectAndDrain(r, res, 429, BUSY)
+    if (accepted + inFlight >= maxUploads) return rejectAndDrain(r, res, 429, 'Demasiadas fotos enviadas en esta sesión.')
 
     inFlight++ // reserva el cupo mientras se recibe, para que subidas concurrentes no superen maxUploads
     try {
@@ -168,9 +207,14 @@ export async function startUploadServer(opts: UploadServerOptions): Promise<Uplo
       const kind = detectImageType(body.data)
       if (kind === 'heic') return reply(res, 415, HEIC_MESSAGE)
       if (kind === null) return reply(res, 415, 'El archivo no es una imagen válida.')
+      // Resolución declarada en la cabecera: se mira ANTES de que nada la decodifique. Sin tamaño legible no se pasa por OCR (415).
+      const size = readImageSize(body.data)
+      if (size === null) return reply(res, 415, 'No se pudo leer el tamaño de la imagen: el archivo no es una imagen válida.')
+      if (size.width > MAX_SIDE || size.height > MAX_SIDE || size.width * size.height > maxPixels) return reply(res, 413, TOO_BIG_PIXELS)
       try {
         await opts.onImage(body.data, sanitizeFilename(firstHeader(r.headers['x-filename'])))
-      } catch {
+      } catch (e) {
+        if (e instanceof UploadRejected) return reply(res, e.status, e.message)
         return reply(res, 500, 'No se pudo procesar la foto en el ordenador. Inténtalo de nuevo.')
       }
       accepted++
@@ -181,9 +225,14 @@ export async function startUploadServer(opts: UploadServerOptions): Promise<Uplo
   }
 
   const server = createServer(
-    { maxHeaderSize: 8192, headersTimeout: timeoutMs, requestTimeout: timeoutMs, connectionsCheckingInterval: Math.max(50, Math.min(1000, timeoutMs / 2)) },
+    {
+      maxHeaderSize: 8192,
+      headersTimeout: headersTimeoutMs,
+      requestTimeout: timeoutMs + NODE_TIMEOUT_MARGIN_MS,
+      connectionsCheckingInterval: Math.max(50, Math.min(1000, headersTimeoutMs / 2))
+    },
     (r, res) => {
-      const where = route(r.url)
+      const where = route(r)
       if (where === null) return reply(res, 404)
       if (where === 'page') {
         if (r.method !== 'GET') return reply(res, 405, '', { Allow: 'GET' })
@@ -198,7 +247,7 @@ export async function startUploadServer(opts: UploadServerOptions): Promise<Uplo
     }
   )
   server.maxConnections = 16
-  server.setTimeout(timeoutMs) // conexiones inactivas
+  server.setTimeout(timeoutMs + NODE_TIMEOUT_MARGIN_MS) // conexiones inactivas
   server.on('clientError', (_e, socket: Socket) => socket.destroy())
 
   await new Promise<void>((resolve, reject) => {
@@ -213,6 +262,8 @@ export async function startUploadServer(opts: UploadServerOptions): Promise<Uplo
     server.close()
     throw new Error(NO_NETWORK)
   }
+
+  announcedHost = `${addr.address}:${addr.port}`.toLowerCase()
 
   let closing: Promise<void> | null = null
   let timer: NodeJS.Timeout | undefined

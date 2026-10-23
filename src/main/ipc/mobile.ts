@@ -3,7 +3,7 @@ import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import QRCode from 'qrcode'
 import { detectImageType, type ImageKind } from '@core/imageType'
-import { startUploadServer, type UploadServer } from '@core/mobile'
+import { startUploadServer, UploadRejected, type UploadServer } from '@core/mobile'
 import { channels, events, type MobileImageEvent, type MobileSession } from '../../shared/api'
 import { handle, safeMessage, trySend } from './common'
 import type { IpcContext, MobileDeps, Registrar, SenderLike } from './context'
@@ -20,6 +20,9 @@ const EXTENSION: Record<ImageKind, string> = { png: 'png', jpeg: 'jpg', gif: 'gi
 const INBOX = 'mobile-inbox'
 /** Un temporal que sobrevive a su sesión (cierre brusco durante el OCR) se borra al arrancar la siguiente, pasada esta edad. */
 const STALE_MS = 60 * 60 * 1000
+/** Fotos esperando OCR (la que se procesa + las que esperan). Cada OCR carga Tesseract (idiomas + WASM): de uno en uno y con cola acotada. */
+const MAX_PENDING_OCR = 5
+const QUEUE_FULL = 'Espera a que se procesen las fotos anteriores'
 
 interface Session {
   subjectId: number
@@ -46,6 +49,10 @@ export function registerMobile(ctx: IpcContext, r: Registrar): { dispose(): Prom
   const deps = ctx.mobile ?? realMobile
   const inbox = join(ctx.userDataDir, INBOX)
   let session: Session | null = null
+  // Cola de OCR: estrictamente una foto a la vez (el temporal espera en disco hasta que le toca; se borra en runOcr).
+  let ocrChain: Promise<unknown> = Promise.resolve()
+  let pendingOcr = 0
+  let generation = 0 // sube en dispose(): lo que seguía en cola se descarta
   // start/stop se encadenan: nunca hay dos servidores a la vez aunque lleguen peticiones simultáneas.
   let chain: Promise<unknown> = Promise.resolve()
   const serial = <T>(fn: () => Promise<T>): Promise<T> => {
@@ -86,14 +93,26 @@ export function registerMobile(ctx: IpcContext, r: Registrar): { dispose(): Prom
     trySend({ sender: s.sender() }, events.mobileImage, payload)
   }
 
+  function enqueueOcr(s: { subjectId: number; sender: () => SenderLike }, path: string): void {
+    const gen = generation
+    pendingOcr++
+    ocrChain = ocrChain
+      .then(() => (gen === generation ? runOcr(s, path) : rm(path, { force: true })))
+      .catch(() => undefined)
+      .finally(() => {
+        pendingOcr--
+      })
+  }
+
   async function receive(s: { subjectId: number; sender: () => SenderLike }, data: Buffer): Promise<void> {
     const kind = detectImageType(data)
     if (kind === null || kind === 'heic') throw new Error('Formato de imagen no válido.')
+    if (pendingOcr >= MAX_PENDING_OCR) throw new UploadRejected(429, QUEUE_FULL) // antes de escribir nada en disco
     await mkdir(inbox, { recursive: true })
     // Nombre generado aquí: nada de lo que envía el móvil (nombre, tipo) forma parte de la ruta.
     const path = join(inbox, `foto-movil-${randomBytes(8).toString('hex')}.${EXTENSION[kind]}`)
     await writeFile(path, data, { flag: 'wx' })
-    void runOcr(s, path)
+    enqueueOcr(s, path)
   }
 
   async function start(subjectId: number, sender: SenderLike): Promise<MobileSession> {
@@ -109,6 +128,7 @@ export function registerMobile(ctx: IpcContext, r: Registrar): { dispose(): Prom
     const target = { subjectId, sender: () => live.session?.sender ?? sender }
     const server = await deps.startUploadServer({
       onImage: (data) => receive(target, data),
+      checkCapacity: () => (pendingOcr >= MAX_PENDING_OCR ? QUEUE_FULL : null),
       onExpire: () => {
         const s = live.session
         if (!s || session !== s) return
@@ -146,5 +166,11 @@ export function registerMobile(ctx: IpcContext, r: Registrar): { dispose(): Prom
     })
   })
 
-  return { dispose: () => serial(async () => void (session && (await close(session)))) }
+  return {
+    dispose: () =>
+      serial(async () => {
+        generation++
+        if (session) await close(session)
+      })
+  }
 }

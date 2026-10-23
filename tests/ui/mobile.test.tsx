@@ -57,7 +57,9 @@ describe('MobileUpload: sesión', () => {
     expect(screen.getByText(MOBILE_URL)).toBeInTheDocument()
     expect(screen.getByText('Tu móvil y este ordenador deben estar en la misma wifi. Escanea el código y haz una foto del apunte.')).toBeInTheDocument()
     expect(
-      screen.getByText('Cualquiera en tu red con este enlace podría enviar fotos mientras esté activo. Se desactiva solo a los 10 minutos o al pulsar Detener.')
+      screen.getByText(
+        'Cualquiera en tu red con este enlace podría enviar fotos mientras esté activo. Se desactiva solo a los 10 minutos o al pulsar Detener. La foto viaja sin cifrar por tu wifi; usa solo redes de confianza.'
+      )
     ).toBeInTheDocument()
     expect(screen.getByText(/Si el móvil no conecta, permite a la app en el Firewall de Windows \(redes privadas\)/)).toBeInTheDocument()
     expect(screen.getByRole('timer')).toHaveTextContent(/Activo/)
@@ -203,6 +205,29 @@ describe('MobileUpload: fotos recibidas', () => {
     expect(screen.queryByLabelText(/Texto reconocido/)).not.toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.queryByText(/ajeno/)).not.toBeInTheDocument()
+  })
+
+  it('una foto de otra asignatura no se descarta en silencio: avisa de que quedó «Sin trocear» en esa asignatura', async () => {
+    const b = bus()
+    installApi({ mobile: b.over })
+    render(<Notes subject={subject} />)
+    await start()
+    await screen.findByRole('timer')
+    b.image(photo(12, 'texto ajeno', 8))
+    expect(screen.getByText('Llegó una foto para otra asignatura; quedó guardada como «Sin trocear» en esa asignatura.')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/Texto reconocido/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/texto ajeno/)).not.toBeInTheDocument()
+  })
+
+  it('si la foto de otra asignatura falló al procesarse, el aviso lo dice sin mostrar el detalle', async () => {
+    const b = bus()
+    installApi({ mobile: b.over })
+    render(<Notes subject={subject} />)
+    await start()
+    await screen.findByRole('timer')
+    b.image({ subjectId: 8, error: 'fallo ajeno' })
+    expect(screen.getByText('Llegó una foto para otra asignatura y no se pudo procesar.')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('un error al procesar la foto se muestra en un Alert (texto plano)', async () => {

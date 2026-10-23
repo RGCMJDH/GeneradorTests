@@ -43,6 +43,7 @@ progress{width:100%}
 #estado{min-height:1.5rem;font-weight:600}
 #estado.ok{color:#116611}
 #estado.error{color:#a01010}
+.pie{font-size:.85rem;color:#555;margin-top:2rem}
 </style>
 </head>
 <body>
@@ -51,6 +52,7 @@ progress{width:100%}
 <input id="foto" type="file" accept="image/*" capture="environment" aria-label="Hacer o elegir una foto">
 <progress id="barra" hidden></progress>
 <p id="estado" role="status" aria-live="polite"></p>
+<p class="pie">Esta conexión no está cifrada (HTTP): la foto viaja sin cifrar por tu wifi. Úsala solo en redes wifi de confianza.</p>
 <script nonce="${nonce}">${script}</script>
 </body>
 </html>

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { openStore, type Store } from '@core/store'
-import type { UploadServer, UploadServerOptions } from '@core/mobile'
+import { UploadRejected, type UploadServer, type UploadServerOptions } from '@core/mobile'
 import { channels, events, type Failure, type MobileSession, type Result } from '../../src/shared/api'
 import { registerIpc } from '../../src/main/ipc'
 import { realCore, type CoreFns, type IpcContext, type MobileDeps, type Registrar } from '../../src/main/ipc/context'
@@ -92,7 +92,7 @@ describe('mobile:start / mobile:stop', () => {
     expect(png.subarray(1, 4).toString('latin1')).toBe('PNG')
     expect(r.data.expiresAt).toBeGreaterThan(Date.now())
     const opts = s.servers[0]!.opts
-    expect(Object.keys(opts).sort()).toEqual(['onExpire', 'onImage']) // sin host/puerto/límites del renderer
+    expect(Object.keys(opts).sort()).toEqual(['checkCapacity', 'onExpire', 'onImage']) // sin host/puerto/límites del renderer
   })
 
   it('el QR se genera con corrección de errores M', async () => {
@@ -287,11 +287,13 @@ describe('foto recibida del móvil', () => {
     const s = await setup({ importImage: probe.importImage })
     const subj = s.store.createSubject('A')
     await s.call(channels.mobileStart, { subjectId: subj.id })
-    for (const name of ['..\\..\\x.png', '/etc/passwd', 'a:b.png', 'CON.png']) {
-      const done = s.servers[0]!.opts.onImage(FOTO, name)
-      await done
+    const names = ['..\\..\\x.png', '/etc/passwd', 'a:b.png', 'CON.png']
+    for (const [i, name] of names.entries()) {
+      await s.servers[0]!.opts.onImage(FOTO, name)
+      await vi.waitFor(() => expect(probe.seen).toHaveLength(i + 1)) // el OCR va de uno en uno
+      probe.finish('x')
+      await vi.waitFor(() => expect(s.sent).toHaveLength(i + 1))
     }
-    await vi.waitFor(() => expect(probe.seen).toHaveLength(4))
     for (const { path } of probe.seen) {
       expect(dirname(path)).toBe(s.inbox)
       expect(path.slice(s.inbox.length)).toMatch(/^[\\/]foto-movil-[0-9a-f]{16}\.png$/)
@@ -374,5 +376,108 @@ describe('apagado de la sesión', () => {
     const src = readFileSync(join(ROOT, 'src/main/index.ts'), 'utf8')
     expect(src).toMatch(/app\.on\('before-quit'[\s\S]{0,120}dispose\(\)/)
     expect(src).toMatch(/registerIpc\(ctx, ipcMain\)/)
+  })
+})
+
+describe('OCR de fotos del móvil: una a la vez', () => {
+  /** importImage falso que deja terminar cada OCR a voluntad y recuerda cuántos corrían a la vez. */
+  function serialProbe() {
+    const calls: Array<{ path: string; finish: (v: string | Error) => void }> = []
+    let running = 0
+    let maxRunning = 0
+    const importImage = vi.fn(async (deps: { store: Store }, subjectId: number, path: string) => {
+      running++
+      maxRunning = Math.max(maxRunning, running)
+      try {
+        const out = await new Promise<string | Error>((finish) => calls.push({ path, finish }))
+        if (out instanceof Error) throw out
+        return { document: deps.store.addDocument({ subjectId, title: 'foto-movil', sourceType: 'image', path }), ocrText: out }
+      } finally {
+        running--
+      }
+    })
+    return { importImage: importImage as unknown as CoreFns['importImage'], calls, maxRunning: () => maxRunning, spy: importImage }
+  }
+  const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 30))
+
+  it('dos fotos seguidas: el segundo OCR no empieza hasta que termina el primero', async () => {
+    const probe = serialProbe()
+    const s = await setup({ importImage: probe.importImage })
+    const subj = s.store.createSubject('A')
+    await s.call(channels.mobileStart, { subjectId: subj.id })
+    const { onImage } = s.servers[0]!.opts
+    await onImage(FOTO, 'a.png')
+    await onImage(FOTO, 'b.png')
+    await tick()
+    expect(probe.calls).toHaveLength(1) // el segundo espera
+    expect(files(s.inbox)).toHaveLength(2) // pero su temporal ya está guardado
+    probe.calls[0]!.finish('uno')
+    await vi.waitFor(() => expect(probe.calls).toHaveLength(2))
+    expect(s.sent).toHaveLength(1)
+    expect((s.sent[0]!.payload as { ocrText: string }).ocrText).toBe('uno')
+    expect(files(s.inbox)).toHaveLength(1) // el primero ya se borró; el segundo sigue en curso
+    probe.calls[1]!.finish('dos')
+    await vi.waitFor(() => expect(s.sent).toHaveLength(2))
+    expect((s.sent[1]!.payload as { ocrText: string }).ocrText).toBe('dos')
+    expect(probe.maxRunning()).toBe(1)
+    expect(files(s.inbox)).toEqual([])
+  })
+
+  it('un OCR que falla no bloquea a los siguientes', async () => {
+    const probe = serialProbe()
+    const s = await setup({ importImage: probe.importImage })
+    const subj = s.store.createSubject('A')
+    await s.call(channels.mobileStart, { subjectId: subj.id })
+    await s.servers[0]!.opts.onImage(FOTO, 'a.png')
+    await s.servers[0]!.opts.onImage(FOTO, 'b.png')
+    await vi.waitFor(() => expect(probe.calls).toHaveLength(1))
+    probe.calls[0]!.finish(new Error('fallo del OCR'))
+    await vi.waitFor(() => expect(probe.calls).toHaveLength(2))
+    probe.calls[1]!.finish('bien')
+    await vi.waitFor(() => expect(s.sent).toHaveLength(2))
+    expect(s.sent.map((m) => 'error' in (m.payload as object))).toEqual([true, false])
+    expect(probe.maxRunning()).toBe(1)
+  })
+
+  it('cola acotada a 5 pendientes: la sexta se rechaza con 429 sin escribir nada, y se libera al terminar una', async () => {
+    const probe = serialProbe()
+    const s = await setup({ importImage: probe.importImage })
+    const subj = s.store.createSubject('A')
+    await s.call(channels.mobileStart, { subjectId: subj.id })
+    const { onImage, checkCapacity } = s.servers[0]!.opts
+    expect(checkCapacity!()).toBeNull()
+    for (let i = 0; i < 5; i++) await onImage(FOTO, `${i}.png`)
+    expect(files(s.inbox)).toHaveLength(5)
+    expect(checkCapacity!()).toBe('Espera a que se procesen las fotos anteriores')
+    const err = await onImage(FOTO, '6.png').catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(UploadRejected)
+    expect(err).toMatchObject({ status: 429, message: 'Espera a que se procesen las fotos anteriores' })
+    expect(files(s.inbox)).toHaveLength(5)
+    await vi.waitFor(() => expect(probe.calls).toHaveLength(1))
+    probe.calls[0]!.finish('uno')
+    await vi.waitFor(() => expect(s.sent).toHaveLength(1))
+    expect(checkCapacity!()).toBeNull()
+    await expect(onImage(FOTO, '7.png')).resolves.toBeUndefined()
+    for (let i = 1; i < 6; i++) {
+      await vi.waitFor(() => expect(probe.calls.length).toBeGreaterThan(i))
+      probe.calls[i]!.finish(`t${i}`)
+    }
+    await vi.waitFor(() => expect(s.sent).toHaveLength(6))
+    expect(files(s.inbox)).toEqual([])
+    expect(probe.maxRunning()).toBe(1)
+  })
+
+  it('dispose() descarta lo que sigue en cola y borra sus temporales', async () => {
+    const probe = serialProbe()
+    const s = await setup({ importImage: probe.importImage })
+    const subj = s.store.createSubject('A')
+    await s.call(channels.mobileStart, { subjectId: subj.id })
+    for (const n of ['a', 'b', 'c']) await s.servers[0]!.opts.onImage(FOTO, `${n}.png`)
+    await vi.waitFor(() => expect(probe.calls).toHaveLength(1))
+    await s.ipc.dispose()
+    probe.calls[0]!.finish('x')
+    await vi.waitFor(() => expect(files(s.inbox)).toEqual([]))
+    await tick()
+    expect(probe.spy).toHaveBeenCalledTimes(1)
   })
 })

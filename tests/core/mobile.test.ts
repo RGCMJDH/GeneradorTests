@@ -6,6 +6,7 @@ import type { NetworkInterfaceInfo } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { detectImageType } from '@core/imageType'
+import { bmp, jpeg, png as pngImage } from './imageBuilders'
 import { pickLanAddress, sanitizeFilename, startUploadServer, tokenMatches } from '@core/mobile'
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url))
@@ -25,7 +26,7 @@ async function start(over: Partial<Parameters<typeof startUploadServer>[0]> = {}
   const server = await startUploadServer({ onImage: spy, host: '127.0.0.1', port: 0, ...over })
   started.push(server)
   const u = new URL(server.url)
-  return { server, spy, origin: u.origin, base: u.pathname, port: Number(u.port) }
+  return { server, spy, origin: u.origin, base: u.pathname, port: Number(u.port), host: u.host }
 }
 
 interface Reply {
@@ -276,7 +277,7 @@ describe('validación del archivo recibido', () => {
     expect(detectImageType(FOTO)).toBe('png')
     expect(detectImageType(Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), pad]))).toBe('jpeg')
     expect(detectImageType(Buffer.concat([Buffer.from('GIF89a'), pad]))).toBe('gif')
-    expect(detectImageType(Buffer.concat([Buffer.from('BM'), pad]))).toBe('bmp')
+    expect(detectImageType(bmp(4, 4))).toBe('bmp')
     expect(detectImageType(Buffer.concat([Buffer.from([0x49, 0x49, 0x2a, 0x00]), pad]))).toBe('tiff')
     expect(detectImageType(Buffer.concat([Buffer.from([0x4d, 0x4d, 0x00, 0x2a]), pad]))).toBe('tiff')
     expect(detectImageType(Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WEBP'), pad]))).toBe('webp')
@@ -319,7 +320,7 @@ describe('límites', () => {
     const s = await start({ maxBytes: 1000 })
     const raw = await rawExchange(
       s.port,
-      `POST ${s.base}/upload HTTP/1.1\r\nHost: x\r\nContent-Type: image/png\r\nContent-Length: 999999999\r\n\r\n`
+      `POST ${s.base}/upload HTTP/1.1\r\nHost: ${s.host}\r\nContent-Type: image/png\r\nContent-Length: 999999999\r\n\r\n`
     )
     expect(raw.data).toMatch(/^HTTP\/1\.1 413 /)
     expect(s.spy).not.toHaveBeenCalled()
@@ -330,7 +331,7 @@ describe('límites', () => {
     const body = FOTO.subarray(0, 600)
     const smuggled = Buffer.alloc(3000, 0x41)
     const payload = Buffer.concat([
-      Buffer.from(`POST ${s.base}/upload HTTP/1.1\r\nHost: x\r\nContent-Type: image/png\r\nContent-Length: ${body.length}\r\n\r\n`),
+      Buffer.from(`POST ${s.base}/upload HTTP/1.1\r\nHost: ${s.host}\r\nContent-Type: image/png\r\nContent-Length: ${body.length}\r\n\r\n`),
       body,
       smuggled
     ])
@@ -339,7 +340,7 @@ describe('límites', () => {
   })
 
   it('un archivo de exactamente maxBytes se acepta', async () => {
-    const png = Buffer.concat([FOTO.subarray(0, 8), Buffer.alloc(992)])
+    const png = pngImage(900, 160, 1000)
     const s = await start({ maxBytes: 1000 })
     expect(png.length).toBe(1000)
     expect((await upload(s, png)).status).toBe(200)
@@ -350,7 +351,7 @@ describe('límites', () => {
     const s = await start()
     const raw = await rawExchange(
       s.port,
-      `POST ${s.base}/upload HTTP/1.1\r\nHost: x\r\nContent-Type: image/png\r\nContent-Length: ${15 * 1024 * 1024 + 1}\r\n\r\n`
+      `POST ${s.base}/upload HTTP/1.1\r\nHost: ${s.host}\r\nContent-Type: image/png\r\nContent-Length: ${15 * 1024 * 1024 + 1}\r\n\r\n`
     )
     expect(raw.data).toMatch(/^HTTP\/1\.1 413 /)
   })
@@ -405,7 +406,7 @@ describe('límites', () => {
   })
 
   it('dos subidas concurrentes se atienden con sus propios bytes', async () => {
-    const other = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(2000, 7)])
+    const other = jpeg(100, 100, 2000)
     const s = await start({}, () => new Promise((r) => setTimeout(r, 30)))
     const [a, b] = await Promise.all([upload(s, FOTO, 'image/png', { 'X-Filename': 'a.png' }), upload(s, other, 'image/jpeg', { 'X-Filename': 'b.jpg' })])
     expect([a.status, b.status]).toEqual([200, 200])
@@ -532,7 +533,7 @@ describe('ciclo de vida', () => {
 
   it('stop() corta también las conexiones abiertas', async () => {
     const s = await start()
-    const hang = rawExchange(s.port, `POST ${s.base}/upload HTTP/1.1\r\nHost: x\r\nContent-Type: image/png\r\nContent-Length: 100\r\n\r\nabc`, 5000)
+    const hang = rawExchange(s.port, `POST ${s.base}/upload HTTP/1.1\r\nHost: ${s.host}\r\nContent-Type: image/png\r\nContent-Length: 100\r\n\r\nabc`, 5000)
     await new Promise((r) => setTimeout(r, 100))
     await s.server.stop()
     expect((await hang).closed).toBe(true)
@@ -540,7 +541,7 @@ describe('ciclo de vida', () => {
 
   it('tras stop() una subida en curso no llega a onImage', async () => {
     const s = await start()
-    const hang = rawExchange(s.port, `POST ${s.base}/upload HTTP/1.1\r\nHost: x\r\nContent-Type: image/png\r\nContent-Length: ${FOTO.length}\r\n\r\n`, 3000)
+    const hang = rawExchange(s.port, `POST ${s.base}/upload HTTP/1.1\r\nHost: ${s.host}\r\nContent-Type: image/png\r\nContent-Length: ${FOTO.length}\r\n\r\n`, 3000)
     await new Promise((r) => setTimeout(r, 100))
     await s.server.stop()
     await hang
@@ -580,7 +581,9 @@ describe('ciclo de vida', () => {
   it('cuerpo lento (se queda a medias): se corta por tiempo y onImage no se llama', async () => {
     const s = await start({ requestTimeoutMs: 300 })
     const t0 = Date.now()
-    const raw = await rawExchange(s.port, `POST ${s.base}/upload HTTP/1.1\r\nHost: x\r\nContent-Type: image/png\r\nContent-Length: 5000\r\n\r\n${'A'.repeat(50)}`, 4000)
+    const raw = await rawExchange(s.port, `POST ${s.base}/upload HTTP/1.1\r\nHost: ${s.host}\r\nContent-Type: image/png\r\nContent-Length: 5000\r\n\r\n${'A'.repeat(50)}`, 4000)
+    expect(raw.data).toMatch(/^HTTP\/1\.1 408 /) // el 408 en español llega al móvil antes de cerrar (no gana la carrera el corte de Node)
+    expect(Buffer.from(raw.data, 'latin1').toString('utf8')).toContain('Se agotó el tiempo de espera')
     expect(raw.closed).toBe(true)
     expect(Date.now() - t0).toBeLessThan(3500)
     expect(s.spy).not.toHaveBeenCalled()
@@ -591,7 +594,7 @@ describe('ciclo de vida', () => {
     const closed = await new Promise<boolean>((resolve) => {
       const sock = connect(s.port, '127.0.0.1')
       sock.on('connect', () => {
-        sock.write(`POST ${s.base}/upload HTTP/1.1\r\nHost: x\r\nContent-Type: image/png\r\nContent-Length: 5000\r\n\r\n`)
+        sock.write(`POST ${s.base}/upload HTTP/1.1\r\nHost: ${s.host}\r\nContent-Type: image/png\r\nContent-Length: 5000\r\n\r\n`)
         const drip = setInterval(() => {
           if (!sock.destroyed) sock.write('A')
         }, 60)
@@ -613,7 +616,7 @@ describe('ciclo de vida', () => {
   it('cabeceras incompletas (slowloris): la conexión se cierra por tiempo', async () => {
     const s = await start({ requestTimeoutMs: 300 })
     const t0 = Date.now()
-    const raw = await rawExchange(s.port, `POST ${s.base}/upload HTTP/1.1\r\nHost: x\r\nContent-Ty`, 4000)
+    const raw = await rawExchange(s.port, `POST ${s.base}/upload HTTP/1.1\r\nHost: ${s.host}\r\nContent-Ty`, 4000)
     expect(raw.closed).toBe(true)
     expect(Date.now() - t0).toBeLessThan(3500)
   })
