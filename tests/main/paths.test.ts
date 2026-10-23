@@ -10,6 +10,11 @@ describe('toUnpacked', () => {
     expect(toUnpacked(packed, () => true)).toBe(win('C:/App/resources/app.asar.unpacked/node_modules/tesseract.js/src/w.js'))
     expect(toUnpacked('/opt/res/app.asar/node_modules/x', () => true)).toBe('/opt/res/app.asar.unpacked/node_modules/x')
   })
+  it('es idempotente: una ruta ya desempaquetada no se reescribe otra vez', () => {
+    const once = toUnpacked(packed, () => true)
+    expect(toUnpacked(once, () => true)).toBe(once)
+    expect(once.split('app.asar.unpacked')).toHaveLength(2)
+  })
   it('deja la ruta igual si la copia desempaquetada no existe', () => {
     expect(toUnpacked(packed, () => false)).toBe(packed)
   })

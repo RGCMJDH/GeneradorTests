@@ -8,7 +8,7 @@ import { OllamaProvider } from '@core/llm'
 import type { OcrOptions } from '@core/ocr'
 import { loadModel } from './config'
 import { realCore, registerIpc, type DialogLike, type IpcContext } from './ipc'
-import { isAllowedNavigation } from './navigation'
+import { isAllowedNavigation, resolveDevUrl } from './navigation'
 import { sqlWasmDir, tesseractWorkerPath } from './paths'
 import { emit, fixtureDialog, runSmoke } from './smoke'
 
@@ -26,9 +26,9 @@ const electronDialog: DialogLike = {
 }
 
 /**
- * OCR: en la app empaquetada el worker de Tesseract se ejecuta desde app.asar.unpacked y los idiomas (spa+eng)
- * vienen incluidos en resources/tessdata como .traineddata.gz (se copian a la caché de userData al usarse la primera vez).
- * En desarrollo no se fija nada: tesseract.js usa su worker y descarga los idiomas.
+ * OCR: `workerPath` se fija siempre (toUnpacked lo lleva a app.asar.unpacked si la app está empaquetada y, si no, deja la ruta de
+ * node_modules). `langPath` solo se fija en la app empaquetada, cuando resources/tessdata trae spa+eng (.traineddata.gz);
+ * sin él, tesseract.js descarga los idiomas de su CDN (desarrollo).
  */
 function ocrBase(): OcrOptions {
   const bundled = join(process.resourcesPath, 'tessdata')
@@ -72,7 +72,7 @@ function createWindow(): BrowserWindow {
 
   // El renderer solo puede mostrar la propia app: sin ventanas nuevas ni navegación externa.
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-  const devUrl = process.env['ELECTRON_RENDERER_URL']
+  const devUrl = resolveDevUrl(app.isPackaged, process.env) // misma URL para cargar y para la guardia de navegación
   const indexPath = join(__dirname, '../renderer/index.html')
   const guard = { devUrl, indexUrl: pathToFileURL(indexPath).href }
   const deny = (e: { preventDefault(): void }, url: string): void => {
@@ -101,7 +101,13 @@ async function main(): Promise<void> {
   if (SMOKE) {
     const timer = setTimeout(() => void finishSmoke(false, 'GT_SMOKE_RESULT {"pass":false,"problems":["timeout"]}'), SMOKE_TIMEOUT_MS)
     await new Promise<void>((resolve) => win.webContents.once('did-finish-load', () => resolve()))
-    const res = await runSmoke(win, dbPath, { packaged: app.isPackaged, wasmDir: sqlWasmDir(), workerPath: ctx.ocr?.workerPath ?? '', langPath: ctx.ocr?.langPath })
+    const res = await runSmoke(win, dbPath, {
+      packaged: app.isPackaged,
+      wasmDir: sqlWasmDir(),
+      workerPath: ctx.ocr?.workerPath ?? '',
+      langPath: ctx.ocr?.langPath,
+      cacheDir: join(ctx.userDataDir, 'tessdata')
+    })
     clearTimeout(timer)
     await finishSmoke(res.ok, res.line)
     return

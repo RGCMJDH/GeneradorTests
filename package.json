@@ -8,8 +8,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "test": "vitest run",
-    "prepack": "node scripts/prepare-tessdata.mjs",
-    "pack": "electron-vite build && electron-builder --win dir"
+    "pack": "node scripts/prepare-tessdata.mjs && electron-vite build && electron-builder --win dir"
   },
   "dependencies": {
     "pdf-parse": "^2.4.5",
@@ -20,6 +19,8 @@
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
+    "@tesseract.js-data/eng": "1.0.0",
+    "@tesseract.js-data/spa": "1.0.0",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
@@ -69,7 +70,7 @@
     ],
     "extraResources": [
       {
-        "from": "build/tessdata",
+        "from": "build-tessdata",
         "to": "tessdata",
         "filter": [
           "*.traineddata.gz",
@@ -107,6 +108,7 @@
       "allowToChangeInstallationDirectory": true,
       "perMachine": false
     },
-    "publish": null
+    "publish": null,
+    "afterPack": "scripts/after-pack.cjs"
   }
 }

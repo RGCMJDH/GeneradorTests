@@ -1,0 +1,5 @@
+{
+  "_comment": "SHA-256 de los archivos que se empaquetan: @tesseract.js-data/{spa,eng}@1.0.0, carpeta 4.0.0_best_int (tessdata_best, Apache-2.0).",
+  "eng.traineddata.gz": "45b4cb346724ac1774f1c36f42f182b887bcdb28ebe63e6fff90ac41f3fcff91",
+  "spa.traineddata.gz": "40be52f97b5d4eb7460073dc1f94cd546b27150333c0bf854ed7e7132db6bceb"
+}

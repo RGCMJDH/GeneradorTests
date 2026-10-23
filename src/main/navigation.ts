@@ -32,3 +32,13 @@ export function isAllowedNavigation(url: string, cfg: NavigationConfig): boolean
   index.hash = ''
   return target.href === index.href
 }
+
+/**
+ * URL del servidor de Vite: SOLO en desarrollo. Una app empaquetada ignora ELECTRON_RENDERER_URL, porque cualquier proceso
+ * que defina esa variable podría si no hacer que la app cargue (y permita navegar a) una URL arbitraria con `window.api` expuesto.
+ */
+export function resolveDevUrl(isPackaged: boolean, env: Record<string, string | undefined>): string | undefined {
+  if (isPackaged) return undefined
+  const url = env['ELECTRON_RENDERER_URL']
+  return url ? url : undefined
+}

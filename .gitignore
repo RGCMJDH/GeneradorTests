@@ -7,4 +7,4 @@ rea/
 .claude/
 .cache/
 release/
-build/
+build-tessdata/
