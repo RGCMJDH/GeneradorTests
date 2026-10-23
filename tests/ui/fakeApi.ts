@@ -5,6 +5,10 @@ type Over = { [K in keyof Api]?: Partial<Api[K]> }
 
 const ok = <T>(data: T) => Promise.resolve({ ok: true as const, data })
 
+export const MOBILE_URL = `http://192.168.1.40:5555/u/${'a'.repeat(32)}`
+/** PNG de 1x1: basta para que el <img> del QR tenga un data URL válido. */
+export const QR_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+
 /** `window.api` falso con todos los métodos como vi.fn; `over` sustituye métodos concretos. */
 export function installApi(over: Over = {}): Api {
   const api: Api = {
@@ -38,6 +42,13 @@ export function installApi(over: Over = {}): Api {
       cancel: vi.fn(() => ok({ cancelled: true })),
       onProgress: vi.fn(() => () => {}),
       ...over.concepts
+    },
+    mobile: {
+      start: vi.fn(() => ok({ url: MOBILE_URL, qrDataUrl: QR_PNG, expiresAt: Date.now() + 600_000 })),
+      stop: vi.fn(() => ok(null)),
+      onImage: vi.fn(() => () => {}),
+      onStopped: vi.fn(() => () => {}),
+      ...over.mobile
     },
     system: {
       health: vi.fn(() => ok({ ok: true, message: 'Ollama listo', model: 'qwen2.5:7b' })),

@@ -77,7 +77,11 @@ async function main(): Promise<void> {
   await app.whenReady()
   const fixtures = join(app.getAppPath(), 'tests', 'fixtures')
   const { ctx, dbPath } = await createContext(SMOKE ? fixtureDialog(fixtures) : electronDialog)
-  registerIpc(ctx, ipcMain)
+  const ipc = registerIpc(ctx, ipcMain)
+  // La subida desde el móvil abre un puerto en la red local: se cierra siempre al salir de la app.
+  app.on('before-quit', () => {
+    void ipc.dispose()
+  })
   const win = createWindow()
 
   if (SMOKE) {

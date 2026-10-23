@@ -162,7 +162,7 @@ describe('token y rutas (sin oráculo)', () => {
     expect(tokenMatches('', token)).toBe(false)
     const src = readFileSync(join(ROOT, 'src/core/mobile.ts'), 'utf8')
     expect(src).toContain('timingSafeEqual')
-    expect(src).not.toMatch(/token\s*={2,3}|={2,3}\s*(this\.)?token/)
+    expect(src).not.toMatch(/(seg\[2\]|candidate)\s*[!=]==?\s*token|token\w*\s*[!=]==?\s*(seg\[2\]|candidate)/)
   })
 
   it('el token es secreto aleatorio de crypto.randomBytes(16)', () => {
@@ -484,6 +484,11 @@ describe('dirección de escucha', () => {
       })
     ).toBe('192.168.1.40')
     expect(pickLanAddress({ Pub: [lan('83.12.1.5')], Wi: [lan('10.0.0.7')] })).toBe('10.0.0.7')
+    // caso real observado: VirtualBox host-only llamado «Ethernet 3» no debe ganar al Wi-Fi
+    expect(pickLanAddress({ 'Ethernet 3': [lan('192.168.56.1')], 'Wi-Fi': [lan('10.160.74.112')] })).toBe('10.160.74.112')
+    expect(pickLanAddress({ 'Ethernet 3': [lan('192.168.56.1')], Ethernet: [lan('192.168.1.5')] })).toBe('192.168.1.5')
+    expect(pickLanAddress({ eth0: [lan('192.168.1.5')], wlan0: [lan('192.168.1.9')] })).toBe('192.168.1.9')
+    expect(pickLanAddress({ eth0: [lan('192.168.1.5')], eth1: [lan('192.168.1.9')] })).toBe('192.168.1.5')
     // si solo hay virtuales, se usa uno
     expect(pickLanAddress({ VirtualBox: [lan('192.168.56.1')] })).toBe('192.168.56.1')
   })

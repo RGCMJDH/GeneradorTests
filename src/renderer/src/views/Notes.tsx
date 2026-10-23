@@ -4,6 +4,7 @@ import { Alert, Busy, Status } from '../components/Alert'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { UNEXPECTED_ERROR } from '../errors'
 import Concepts from './Concepts'
+import MobileUpload, { type ReceivedPhoto } from './MobileUpload'
 import { NotesChunks } from './NotesChunks'
 import { NotesDocuments } from './NotesDocuments'
 import OcrReview from './OcrReview'
@@ -46,13 +47,16 @@ export default function Notes({ subject, onBlockingChange }: Props) {
   const [viewing, setViewing] = useState<number | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
   const [conceptsBusy, setConceptsBusy] = useState(false)
+  const [mobileActive, setMobileActive] = useState(false)
+  // Fotos del móvil ya reconocidas que esperan su turno de revisión (solo se revisa una a la vez).
+  const [queued, setQueued] = useState<ReceivedPhoto[]>([])
   const docsHeading = useRef<HTMLHeadingElement>(null)
   const [focusNonce, setFocusNonce] = useState(0)
   const sid = subject.id
 
   useEffect(() => {
-    onBlockingChange?.(busy ? 'import' : ocr ? 'ocr' : conceptsBusy ? 'concepts' : null)
-  }, [busy, ocr, conceptsBusy, onBlockingChange])
+    onBlockingChange?.(busy ? 'import' : ocr ? 'ocr' : conceptsBusy ? 'concepts' : mobileActive ? 'mobile' : null)
+  }, [busy, ocr, conceptsBusy, mobileActive, onBlockingChange])
   useEffect(() => () => onBlockingChange?.(null), [onBlockingChange])
 
   // Tras borrar/confirmar/descartar, el botón que abrió la acción ya no existe: el foco va a un destino estable.
@@ -74,6 +78,21 @@ export default function Notes({ subject, onBlockingChange }: Props) {
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  // Una foto del móvil entra por el MISMO camino que una importada en el PC: revisión OCR obligatoria antes de trocear.
+  const onMobilePhoto = useCallback(
+    (photo: ReceivedPhoto): void => {
+      setQueued((q) => [...q, photo])
+      void refresh()
+    },
+    [refresh]
+  )
+  useEffect(() => {
+    const next = queued[0]
+    if (!next || busy !== null || ocr !== null) return
+    setQueued((q) => q.slice(1))
+    setOcr({ documentId: next.documentId, text: next.text, missing: false })
+  }, [queued, busy, ocr])
 
   async function importFile(kind: ImportKind): Promise<void> {
     setBusy(kind)
@@ -119,6 +138,7 @@ export default function Notes({ subject, onBlockingChange }: Props) {
       setToDelete(null)
       if (!res.ok) return setError(res.error)
       setError(null)
+      setQueued((q) => q.filter((p) => p.documentId !== doc.id))
       setStatus(`«${doc.title}» eliminado.`)
       if (viewing === doc.id) setViewing(null)
       await refresh()
@@ -145,6 +165,15 @@ export default function Notes({ subject, onBlockingChange }: Props) {
         {busy ? <Busy>{BUSY_TEXT[busy]}</Busy> : <Status>{status}</Status>}
         <Alert>{error}</Alert>
       </section>
+
+      <MobileUpload subjectId={sid} onPhoto={onMobilePhoto} onActiveChange={setMobileActive} />
+
+      {ocr && queued.length > 0 && (
+        <p role="note" className="notice">
+          {queued.length === 1 ? '1 foto más recibida del móvil esperando revisión' : `${queued.length} fotos más recibidas del móvil esperando revisión`}: se abrirá al terminar esta
+          revisión.
+        </p>
+      )}
 
       {ocr && (
         <OcrReview

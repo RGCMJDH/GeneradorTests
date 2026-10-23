@@ -23,6 +23,8 @@ export const channels = {
   conceptsList: 'concepts:list',
   conceptsBuild: 'concepts:build',
   conceptsCancel: 'concepts:cancel',
+  mobileStart: 'mobile:start',
+  mobileStop: 'mobile:stop',
   systemHealth: 'system:health',
   systemConfig: 'system:config'
 } as const
@@ -30,7 +32,11 @@ export const channels = {
 /** Canales de eventos main → renderer (webContents.send). No tienen handler. */
 export const events = {
   quizProgress: 'quiz:progress',
-  conceptsProgress: 'concepts:progress'
+  conceptsProgress: 'concepts:progress',
+  /** Una foto llegó desde el móvil (ya procesada con OCR, o con el error). */
+  mobileImage: 'mobile:image',
+  /** La sesión de subida desde el móvil se apagó sola (caducó). */
+  mobileStopped: 'mobile:stopped'
 } as const
 
 export type ChannelName = (typeof channels)[keyof typeof channels]
@@ -124,6 +130,25 @@ export interface ConceptsOutcome {
   failed: number
 }
 
+export interface MobileStartRequest {
+  subjectId: number
+}
+
+/** Sesión de subida desde el móvil. `qrDataUrl` es un PNG `data:` generado en main; `url` se muestra como texto plano. */
+export interface MobileSession {
+  url: string
+  qrDataUrl: string
+  /** Epoch ms en que la sesión se apaga sola. */
+  expiresAt: number
+}
+
+/** Foto recibida del móvil: el texto OCR queda pendiente de revisión (igual que una foto importada en el PC). */
+export type MobileImageEvent = { subjectId: number; documentId: number; ocrText: string } | { subjectId: number; error: string }
+
+export interface MobileStoppedEvent {
+  reason: 'expired'
+}
+
 export interface SubmitRequest {
   subjectId: number
   attemptId: number
@@ -201,6 +226,14 @@ export interface Api {
     cancel(requestId: string): Promise<Result<{ cancelled: boolean }>>
     /** Devuelve la función para cancelar la suscripción. */
     onProgress(cb: (e: ProgressEvent) => void): () => void
+  }
+  mobile: {
+    /** Arranca (o devuelve) la subida desde el móvil para esa asignatura. Solo hay una sesión en toda la app. */
+    start(req: MobileStartRequest): Promise<Result<MobileSession>>
+    stop(): Promise<Result<null>>
+    /** Devuelven la función para cancelar la suscripción. */
+    onImage(cb: (e: MobileImageEvent) => void): () => void
+    onStopped(cb: (e: MobileStoppedEvent) => void): () => void
   }
   system: {
     health(): Promise<Result<HealthDto>>

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { channels, events, type Api, type ProgressEvent } from '../shared/api'
+import { channels, events, type Api, type MobileImageEvent, type MobileStoppedEvent, type ProgressEvent } from '../shared/api'
 
 // Solo se expone la API tipada; ipcRenderer nunca llega al renderer.
 const api: Api = {
@@ -42,6 +42,24 @@ const api: Api = {
       ipcRenderer.on(events.conceptsProgress, listener)
       return () => {
         ipcRenderer.removeListener(events.conceptsProgress, listener)
+      }
+    }
+  },
+  mobile: {
+    start: (req) => ipcRenderer.invoke(channels.mobileStart, req),
+    stop: () => ipcRenderer.invoke(channels.mobileStop),
+    onImage: (cb) => {
+      const listener = (_e: unknown, payload: MobileImageEvent): void => cb(payload)
+      ipcRenderer.on(events.mobileImage, listener)
+      return () => {
+        ipcRenderer.removeListener(events.mobileImage, listener)
+      }
+    },
+    onStopped: (cb) => {
+      const listener = (_e: unknown, payload: MobileStoppedEvent): void => cb(payload)
+      ipcRenderer.on(events.mobileStopped, listener)
+      return () => {
+        ipcRenderer.removeListener(events.mobileStopped, listener)
       }
     }
   },

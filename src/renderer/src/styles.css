@@ -442,6 +442,19 @@ textarea {
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
+.mobile__qr {
+  display: block;
+  margin: 0.75rem 0;
+  padding: 0.5rem;
+  background: #fff; /* el QR necesita fondo claro para leerse, también en modo oscuro */
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  image-rendering: pixelated;
+}
+.mobile__url {
+  overflow-wrap: anywhere;
+  user-select: all;
+}
 .ocr__text {
   font-family: var(--mono);
   font-size: var(--step--1);

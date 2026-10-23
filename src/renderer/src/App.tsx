@@ -100,6 +100,8 @@ export default function App() {
               Tienes una revisión de OCR sin confirmar. Si cambias de asignatura se perderá el texto reconocido: la foto quedará como documento «Sin trocear» y
               podrás reanudar la revisión, pero tendrás que escribir el texto de nuevo.
             </p>
+          ) : switchTo.kind === 'mobile' ? (
+            <p>La subida desde el móvil está activa. Si cambias de asignatura se detendrá, y las fotos que lleguen después ya no se podrán revisar aquí.</p>
           ) : switchTo.kind === 'concepts' ? (
             <p>Hay una extracción de conceptos en curso. Si cambias de asignatura se cancelará y habrá que empezar de nuevo; el índice de conceptos guardado no cambia.</p>
           ) : (

@@ -1,6 +1,6 @@
 // __GT_DEV_MOCK__ — marcador para verificar que este archivo NO llega al paquete de producción.
 // `window.api` falso en memoria para previsualizar la interfaz en un navegador normal (solo `vite dev`).
-import type { Api, Chunk, Concept, DocumentInfo, GenerateOutcome, GenerateRequestDto, GradeResultDto, HistoryAttempt, ImportKind, Question, Result, Subject } from '../../shared/api'
+import type { Api, Chunk, Concept, DocumentInfo, GenerateOutcome, GenerateRequestDto, GradeResultDto, HistoryAttempt, ImportKind, MobileImageEvent, MobileStoppedEvent, Question, Result, Subject } from '../../shared/api'
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 const ok = <T>(data: T): Result<T> => ({ ok: true, data })
@@ -10,6 +10,9 @@ const fail = (error: string, code?: 'NOT_FOUND' | 'NO_TEXT' | 'WOULD_DELETE_QUES
   ...(code ? { code } : {}),
   ...(count !== undefined ? { count } : {})
 })
+
+/** PNG de 1x1 como QR de relleno: en el simulador no hay red ni servidor. */
+const MOCK_QR = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
 
 const SAMPLE = [
   'La célula es la unidad básica estructural y funcional de los seres vivos. Todos los organismos están formados por una o más células.',
@@ -62,6 +65,21 @@ export function createDevMockApi(): Api {
     return [...byTerm.values()].sort((a, b) => b.chunkIds.length - a.chunkIds.length || a.term.localeCompare(b.term, 'es'))
   }
   const conceptListeners = new Set<(e: { requestId: string; done: number; total: number }) => void>()
+
+  // Subida desde el móvil simulada: sin servidor ni red. A los 8 s «llega» una foto y luego otra cada 15 s mientras siga activa.
+  const photoListeners = new Set<(e: MobileImageEvent) => void>()
+  const stoppedListeners = new Set<(e: MobileStoppedEvent) => void>()
+  let mobileTimers: ReturnType<typeof setTimeout>[] = []
+  const stopMobile = (): void => {
+    mobileTimers.forEach(clearTimeout)
+    mobileTimers = []
+  }
+  const simulatePhoto = (subjectId: number, n: number): void => {
+    const d = addDoc(subjectId, `foto-movil-${n.toString(16).padStart(8, '0')}`, 'image', [])
+    const ocrText = 'La celula es la unidad basica de los seres vivos.\nLa membrana plasmatica regula el intercambio'
+    photoListeners.forEach((cb) => cb({ subjectId, documentId: d.id, ocrText }))
+    mobileTimers.push(setTimeout(() => simulatePhoto(subjectId, n + 1), 15_000))
+  }
 
   const addDoc = (subjectId: number, title: string, sourceType: ImportKind, texts: string[]): DocumentInfo => {
     const d: DocumentInfo = { id: nextId++, subjectId, title, sourceType, chunkCount: 0 }
@@ -296,6 +314,32 @@ export function createDevMockApi(): Api {
       onProgress: (cb) => {
         conceptListeners.add(cb)
         return () => conceptListeners.delete(cb)
+      }
+    },
+    mobile: {
+      start: async ({ subjectId }) => {
+        await delay(300)
+        stopMobile()
+        mobileTimers.push(setTimeout(() => simulatePhoto(subjectId, 1), 8_000))
+        mobileTimers.push(
+          setTimeout(() => {
+            stopMobile()
+            stoppedListeners.forEach((cb) => cb({ reason: 'expired' }))
+          }, 10 * 60_000)
+        )
+        return ok({ url: 'http://192.168.1.40:5173/u/0123456789abcdef0123456789abcdef', qrDataUrl: MOCK_QR, expiresAt: Date.now() + 10 * 60_000 })
+      },
+      stop: async () => {
+        stopMobile()
+        return ok(null)
+      },
+      onImage: (cb) => {
+        photoListeners.add(cb)
+        return () => photoListeners.delete(cb)
+      },
+      onStopped: (cb) => {
+        stoppedListeners.add(cb)
+        return () => stoppedListeners.delete(cb)
       }
     },
     history: { list: async (subjectId) => ok(attempts.filter((a) => a.subjectId === subjectId).map(({ subjectId: _s, ...rest }) => ({ ...rest, answers: [...rest.answers] }))) },

@@ -134,6 +134,13 @@ describe('preload', () => {
     for (const v of [...Object.values(channels), ...Object.values(events)]) expect(preload).not.toContain(`'${v}'`)
     expect(preload).not.toMatch(/exposeInMainWorld\('api',\s*ipcRenderer/)
   })
+
+  it('las suscripciones del móvil devuelven la función para cancelarlas', () => {
+    for (const ev of ['mobileImage', 'mobileStopped']) {
+      expect(preload).toContain(`ipcRenderer.on(events.${ev}, listener)`)
+      expect(preload).toContain(`ipcRenderer.removeListener(events.${ev}, listener)`)
+    }
+  })
 })
 
 // ---------------------------------------------------------- (iii) validación
@@ -188,6 +195,12 @@ describe('validación en la frontera IPC', () => {
     ['concepts:build', 'clave extra tipo ruta', [{ requestId: 'r', subjectId: 1, path: 'C:\\x' }]],
     ['concepts:build', 'argumentos de más', [{ requestId: 'r', subjectId: 1 }, 'x']],
     ['concepts:cancel', 'requestId no string', [7]],
+    ['mobile:start', 'payload no objeto', ['hola']],
+    ['mobile:start', 'sin argumentos', []],
+    ['mobile:start', 'subjectId inválido', [{ subjectId: 0 }]],
+    ['mobile:start', 'clave extra tipo host', [{ subjectId: 1, host: '0.0.0.0' }]],
+    ['mobile:start', 'argumentos de más', [{ subjectId: 1 }, 'x']],
+    ['mobile:stop', 'argumentos de más', ['x']],
     ['system:health', 'argumentos de más', ['x']]
   ]
 
@@ -539,6 +552,7 @@ describe('manejo de excepciones', () => {
       'quiz:startAttempt': [1], 'quiz:finishAttempt': [1, 1],
       'quiz:submit': [{ subjectId: 1, attemptId: 1, questionId: 1, answer: 'a' }], 'history:list': [1],
       'concepts:list': [1], 'concepts:build': [{ requestId: 'r', subjectId: 1 }], 'concepts:cancel': ['r'],
+      'mobile:start': [{ subjectId: 1 }], 'mobile:stop': [],
       'system:health': [], 'system:config': []
     }
     expect(Object.keys(valid).sort()).toEqual(Object.values(channels).sort())
