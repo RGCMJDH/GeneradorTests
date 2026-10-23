@@ -1,5 +1,6 @@
 import { existsSync, statSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { join, relative, isAbsolute, resolve } from 'node:path'
 import type { BrowserWindow } from 'electron'
 import type { DialogLike } from './ipc'
 
@@ -8,7 +9,8 @@ export function fixtureDialog(fixturesDir: string): DialogLike {
   return {
     async showOpenDialog(opts) {
       const ext = opts.filters[0]?.extensions[0]
-      const file = ext === 'pdf' ? (process.env['GT_SMOKE_PDF'] ?? 'apuntes.pdf') : 'apuntes-ejemplo.md'
+      const file =
+        ext === 'pdf' ? (process.env['GT_SMOKE_PDF'] ?? 'apuntes.pdf') : ext === 'png' ? 'foto-apuntes.png' : 'apuntes-ejemplo.md'
       return { canceled: false, filePaths: [join(fixturesDir, file)] }
     }
   }
@@ -24,6 +26,7 @@ const PAGE_SCRIPT = `(async () => {
   const id = created.ok ? created.data.id : -1
   const text = await api.notes.import(id, 'text')
   const pdf = await api.notes.import(id, 'pdf')
+  const image = await api.notes.import(id, 'image')
   const health = await api.system.health()
   const bad = await api.subjects.create('')
   out.created = created.ok
@@ -31,6 +34,8 @@ const PAGE_SCRIPT = `(async () => {
   out.textChunks = text.ok && !text.data.canceled ? text.data.document.chunkCount : -1
   out.pdfResult = pdf.ok ? 'ok' : pdf.code
   out.pdfChunks = pdf.ok && !pdf.data.canceled ? pdf.data.document.chunkCount : -1
+  out.imageResult = image.ok ? 'ok' : image.code + ': ' + image.error
+  out.ocrText = image.ok && !image.data.canceled && image.data.kind === 'image' ? image.data.ocrText.slice(0, 120) : ''
   out.health = health.ok ? health.data : { error: health.error }
   out.invalidCode = bad.ok ? 'none' : bad.code
   const unsub = api.quiz.onProgress(() => {})
@@ -46,6 +51,8 @@ interface PageResult {
   textChunks: number
   pdfResult: string
   pdfChunks: number
+  imageResult: string
+  ocrText: string
   invalidCode: string
   health: { ok?: boolean; message?: string; error?: string }
 }
@@ -55,11 +62,20 @@ export interface SmokeOutcome {
   line: string
 }
 
-export async function runSmoke(win: BrowserWindow, dbPath: string): Promise<SmokeOutcome> {
+/** Datos del entorno que el smoke imprime para demostrar de dónde se cargó cada recurso. */
+export interface SmokeEnv {
+  packaged: boolean
+  wasmDir: string
+  workerPath: string
+  langPath: string | undefined
+}
+
+export async function runSmoke(win: BrowserWindow, dbPath: string, env: SmokeEnv): Promise<SmokeOutcome> {
   try {
     const page = (await win.webContents.executeJavaScript(PAGE_SCRIPT)) as PageResult
     const result = {
-      wasm: true, // openStore ya resolvió: sql-wasm.wasm cargado desde el paquete
+      wasm: true, // openStore ya resolvió: sql-wasm.wasm cargado desde env.wasmDir
+      ...env,
       dbFileBytes: existsSync(dbPath) ? statSync(dbPath).size : 0,
       ...page
     }
@@ -69,6 +85,7 @@ export async function runSmoke(win: BrowserWindow, dbPath: string): Promise<Smok
     if (result.subjects !== 1) problems.push(`subjects=${String(result.subjects)}`)
     if (!(Number(result.textChunks) > 0)) problems.push('la importación de texto no creó chunks')
     if (!(Number(result.pdfChunks) > 0)) problems.push(`importación de PDF: ${String(result.pdfResult)}`)
+    if (!result.ocrText.toLowerCase().includes('mitocondria')) problems.push(`OCR: ${String(result.imageResult)} «${result.ocrText}»`)
     if (result.invalidCode !== 'INVALID') problems.push('la validación no rechazó un nombre vacío')
     if (result.dbFileBytes <= 0) problems.push('apuntes.sqlite no se escribió')
     if (typeof result.health.message !== 'string') problems.push('health sin mensaje')
@@ -79,10 +96,16 @@ export async function runSmoke(win: BrowserWindow, dbPath: string): Promise<Smok
   }
 }
 
-/** Escribe la línea en stdout y, si GT_SMOKE_OUT está definido, también en ese archivo (útil si el stdout no se captura). */
+/** GT_SMOKE_OUT solo puede apuntar dentro de la carpeta temporal del sistema (nunca a rutas arbitrarias). */
+export function isInsideTmp(path: string): boolean {
+  const rel = relative(resolve(tmpdir()), resolve(path))
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+}
+
+/** Escribe la línea en stdout y, si GT_SMOKE_OUT está definido (y dentro de os.tmpdir()), también en ese archivo (útil si el stdout no se captura). */
 export function emit(line: string): Promise<void> {
   const out = process.env['GT_SMOKE_OUT']
-  if (out) {
+  if (out && isInsideTmp(out)) {
     try {
       writeFileSync(out, line + '\n')
     } catch {

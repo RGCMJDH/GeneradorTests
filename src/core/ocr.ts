@@ -1,4 +1,4 @@
-import { open, readFile, stat } from 'node:fs/promises'
+import { mkdir, open, readFile, stat } from 'node:fs/promises'
 import { basename } from 'node:path'
 import { createWorker } from 'tesseract.js'
 import { detectImageType } from './imageType'
@@ -6,6 +6,8 @@ import { detectImageType } from './imageType'
 export interface OcrOptions {
   /** Origen de los datos de idioma (por defecto el CDN de tesseract.js, solo para desarrollo/tests). */
   langPath?: string
+  /** Script del worker de Tesseract; la app empaquetada lo apunta a app.asar.unpacked (un Worker no puede ejecutarse desde dentro del asar). */
+  workerPath?: string
   /** Carpeta donde se cachean los .traineddata; la app de Electron la apunta a userData. */
   cachePath?: string
   /** Idiomas de Tesseract, por defecto 'spa+eng'. */
@@ -62,6 +64,8 @@ const LANG_DATA_ERROR =
  * si fallan los datos de idioma, el error llega únicamente a `errorHandler` y la promesa no se resuelve nunca.
  */
 async function startWorker(opts: OcrOptions): Promise<Worker> {
+  // tesseract.js escribe la caché sin crear la carpeta: si falta, los idiomas se volverían a leer/descargar en cada OCR.
+  if (opts.cachePath) await mkdir(opts.cachePath, { recursive: true }).catch(() => undefined)
   let failFirst: (e: Error) => void = () => undefined
   const firstError = new Promise<never>((_, reject) => {
     failFirst = reject
@@ -69,6 +73,7 @@ async function startWorker(opts: OcrOptions): Promise<Worker> {
   const creating = createWorker((opts.langs ?? 'spa+eng').split('+'), 1, {
     ...(opts.langPath ? { langPath: opts.langPath } : {}),
     ...(opts.cachePath ? { cachePath: opts.cachePath } : {}),
+    ...(opts.workerPath ? { workerPath: opts.workerPath } : {}),
     // Sin errorHandler tesseract.js relanza el error del worker como excepción no capturada
     // (tumbaría el proceso principal): se registra el primero y se usa para abortar la espera.
     errorHandler: (e: unknown) => failFirst(new Error(String(e)))

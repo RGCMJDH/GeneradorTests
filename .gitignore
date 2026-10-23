@@ -6,3 +6,5 @@ dist
 rea/
 .claude/
 .cache/
+release/
+build/

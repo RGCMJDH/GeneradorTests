@@ -23,6 +23,7 @@ const DIALOGS: Record<ImportKind, { title: string; filters: Array<{ name: string
 const OCR_LOAD_TIMEOUT_MS = 300_000
 
 const ocrOptions = (ctx: IpcContext): OcrOptions => ({
+  ...ctx.ocr,
   cachePath: join(ctx.userDataDir, 'tessdata'),
   timeoutMs: OCR_LOAD_TIMEOUT_MS
 })

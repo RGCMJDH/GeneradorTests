@@ -1,5 +1,6 @@
 import type { Store } from '@core/store'
 import type { LlmProvider } from '@core/llm'
+import type { OcrOptions } from '@core/ocr'
 import { importTextFile, importPdf, importImage, confirmOcr } from '@core/ingest'
 import { generateQuestions } from '@core/generate'
 import { gradeAnswer } from '@core/grade'
@@ -65,6 +66,8 @@ export interface IpcContext {
   core: CoreFns
   /** Por defecto el servidor real y `qrcode`. */
   mobile?: MobileDeps
+  /** Ajustes de OCR dependientes del empaquetado (workerPath, langPath); main/index.ts los rellena. */
+  ocr?: OcrOptions
   /** Tope duro de system:health aunque el proveedor no responda (por defecto 5000). */
   healthTimeoutMs?: number
 }

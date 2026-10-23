@@ -1,28 +1,40 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
-import { mkdirSync, rmSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, mkdirSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
 import { openStore } from '@core/store'
 import { OllamaProvider } from '@core/llm'
+import type { OcrOptions } from '@core/ocr'
 import { loadModel } from './config'
 import { realCore, registerIpc, type DialogLike, type IpcContext } from './ipc'
 import { isAllowedNavigation } from './navigation'
+import { sqlWasmDir, tesseractWorkerPath } from './paths'
 import { emit, fixtureDialog, runSmoke } from './smoke'
 
 const SMOKE = process.env['GT_SMOKE'] === '1'
-const SMOKE_TIMEOUT_MS = 90_000
+const SMOKE_TIMEOUT_MS = 100_000
 
 // Antes de `ready`: el modo smoke usa un userData desechable y nunca toca los datos reales.
 if (SMOKE) app.setPath('userData', join(tmpdir(), `gt-smoke-${process.pid}`))
-
-/** Carpeta de sql.js/dist: funciona en desarrollo y empaquetado (dentro de app.asar fs también lee). */
-const sqlWasmDir = (): string => dirname(require.resolve('sql.js/dist/sql-wasm.wasm'))
 
 const electronDialog: DialogLike = {
   showOpenDialog(opts) {
     const parent = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
     return parent ? dialog.showOpenDialog(parent, opts) : dialog.showOpenDialog(opts)
+  }
+}
+
+/**
+ * OCR: en la app empaquetada el worker de Tesseract se ejecuta desde app.asar.unpacked y los idiomas (spa+eng)
+ * vienen incluidos en resources/tessdata como .traineddata.gz (se copian a la caché de userData al usarse la primera vez).
+ * En desarrollo no se fija nada: tesseract.js usa su worker y descarga los idiomas.
+ */
+function ocrBase(): OcrOptions {
+  const bundled = join(process.resourcesPath, 'tessdata')
+  return {
+    workerPath: tesseractWorkerPath(),
+    ...(app.isPackaged && ['spa', 'eng'].every((l) => existsSync(join(bundled, `${l}.traineddata.gz`))) ? { langPath: bundled } : {})
   }
 }
 
@@ -38,7 +50,8 @@ async function createContext(dlg: DialogLike): Promise<{ ctx: IpcContext; dbPath
     dialog: dlg,
     userDataDir,
     model,
-    core: realCore
+    core: realCore,
+    ocr: ocrBase()
   }
   return { ctx, dbPath }
 }
@@ -75,7 +88,8 @@ function createWindow(): BrowserWindow {
 
 async function main(): Promise<void> {
   await app.whenReady()
-  const fixtures = join(app.getAppPath(), 'tests', 'fixtures')
+  // Empaquetado, los fixtures del smoke van en resources/smoke-fixtures (extraResources); en desarrollo, tests/fixtures.
+  const fixtures = app.isPackaged ? join(process.resourcesPath, 'smoke-fixtures') : join(app.getAppPath(), 'tests', 'fixtures')
   const { ctx, dbPath } = await createContext(SMOKE ? fixtureDialog(fixtures) : electronDialog)
   const ipc = registerIpc(ctx, ipcMain)
   // La subida desde el móvil abre un puerto en la red local: se cierra siempre al salir de la app.
@@ -87,7 +101,7 @@ async function main(): Promise<void> {
   if (SMOKE) {
     const timer = setTimeout(() => void finishSmoke(false, 'GT_SMOKE_RESULT {"pass":false,"problems":["timeout"]}'), SMOKE_TIMEOUT_MS)
     await new Promise<void>((resolve) => win.webContents.once('did-finish-load', () => resolve()))
-    const res = await runSmoke(win, dbPath)
+    const res = await runSmoke(win, dbPath, { packaged: app.isPackaged, wasmDir: sqlWasmDir(), workerPath: ctx.ocr?.workerPath ?? '', langPath: ctx.ocr?.langPath })
     clearTimeout(timer)
     await finishSmoke(res.ok, res.line)
     return
