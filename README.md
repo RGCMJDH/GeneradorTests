@@ -18,12 +18,12 @@ Importas tus apuntes por asignatura, la app los trocea, y genera preguntas de ve
 
 ## La promesa y sus límites
 
-Cada pregunta que ves lleva una **cita literal** de tus apuntes, y el código comprueba que esa cita aparece en el fragmento de origen. Si el modelo no consigue una cita válida tras tres intentos, la pregunta se descarta y el resumen te dice cuántas y por qué. Si tus apuntes no cubren un tema, la app lo dice en vez de inventar.
+Cada pregunta que ves lleva una **cita literal** de tus apuntes, y el código comprueba que esa cita aparece en el fragmento de origen, con los mismos números, signos y operadores. Si el modelo no consigue una cita válida tras tres intentos, la pregunta se descarta y el resumen te dice cuántas y por qué. Si tus apuntes no cubren un tema, la app lo dice en vez de inventar.
 
 Lo que **no** garantiza:
 
 - La comprobación prueba que el **pasaje existe** en tus apuntes, no que la pregunta esté bien planteada ni que el modelo lo haya entendido. Revisa las preguntas con criterio.
-- Se **ignoran los símbolos** al comparar: `x = -5` y `x = 5` pueden darse por iguales, y también `2,5` y `2.5`. Es una debilidad conocida, sobre todo en ejercicios con números.
+- En los **ejercicios prácticos** se comprueba además que cada número del enunciado, la respuesta y la explicación esté en tus apuntes. Esto no se aplica a verdadero/falso ni a test, donde una opción incorrecta puede cambiar una cifra a propósito.
 - La calidad depende del modelo. Con modelos pequeños se descartan más preguntas.
 
 ## Requisitos

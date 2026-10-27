@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef } from 'react'
-import { modeText, type QuizMode } from '../quizMode'
+import { MODEL_UNAVAILABLE, modeText, type QuizMode } from '../quizMode'
 
 export interface Summary {
   /** Preguntas mostrables (con id y cita). */
@@ -7,6 +7,8 @@ export interface Summary {
   discarded: number
   reasons: string[]
   insufficient: boolean
+  /** El modelo no respondió: los descartes son errores del modelo, no falta de respaldo en los apuntes. */
+  modelUnavailable: boolean
   cancelled: boolean
 }
 
@@ -22,7 +24,7 @@ interface Props {
 export function GenerationSummary({ mode = 'test', summary, starting, onStart, onBack }: Props) {
   const text = modeText(mode)
   const titleId = useId()
-  const { count, discarded, reasons, insufficient, cancelled } = summary
+  const { count, discarded, reasons, insufficient, modelUnavailable, cancelled } = summary
   const heading = useRef<HTMLHeadingElement>(null)
   useEffect(() => heading.current?.focus(), [])
   return (
@@ -41,10 +43,15 @@ export function GenerationSummary({ mode = 'test', summary, starting, onStart, o
           {text.insufficient}
         </p>
       )}
-      {count === 0 && discarded === 0 && !insufficient && !cancelled && <p>{text.nothingGenerated}</p>}
+      {modelUnavailable && count === 0 && !cancelled && (
+        <p className="notice" role="status">
+          {MODEL_UNAVAILABLE}
+        </p>
+      )}
+      {count === 0 && discarded === 0 && !insufficient && !modelUnavailable && !cancelled && <p>{text.nothingGenerated}</p>}
       {discarded > 0 && (
         <div className="notice" role="status">
-          <p>{text.discarded(discarded)}</p>
+          {!modelUnavailable && <p>{text.discarded(discarded)}</p>}
           {reasons.length > 0 && (
             <ul aria-label="Motivos del descarte">
               {reasons.map((r, i) => (

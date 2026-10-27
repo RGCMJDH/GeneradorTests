@@ -41,7 +41,7 @@ function summarize(out: GenerateOutcome, cancelled: boolean, mode: QuizMode): { 
   const questions = out.questions.filter(showable)
   const hidden = out.questions.length - questions.length
   const reasons = hidden > 0 ? [...out.reasons, `${hidden} ${modeText(mode).hidden(hidden)}`] : out.reasons
-  return { questions, summary: { count: questions.length, discarded: out.discarded + hidden, reasons, insufficient: out.insufficient, cancelled } }
+  return { questions, summary: { count: questions.length, discarded: out.discarded + hidden, reasons, insufficient: out.insufficient, modelUnavailable: out.modelUnavailable === true, cancelled } }
 }
 
 /** Generar → resumen → responder una a una con corrección → nota. Lo comparten las pestañas Test y Ejercicios. */
