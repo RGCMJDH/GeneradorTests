@@ -24,7 +24,7 @@ export const realCore: CoreFns = { importTextFile, importPdf, importImage, confi
 export interface DialogLike {
   showOpenDialog(opts: {
     title?: string
-    properties: Array<'openFile'>
+    properties: Array<'openFile' | 'multiSelections'>
     filters: Array<{ name: string; extensions: string[] }>
   }): Promise<{ canceled: boolean; filePaths: string[] }>
 }

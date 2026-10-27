@@ -9,22 +9,54 @@ export function renderUploadPage(opts: { uploadPath: string; nonce: string; maxB
   const script = `(function () {
   var UPLOAD = ${JSON.stringify(uploadPath)};
   var MAX = ${Math.trunc(maxBytes)};
-  var input = document.getElementById('foto');
+  // Si el ordenador pide esperar (Retry-After: su cola de OCR está llena), se reenvía la misma foto; ~5 min como mucho.
+  var REINTENTOS = 60;
+  var camara = document.getElementById('foto');
+  var galeria = document.getElementById('galeria');
   var estado = document.getElementById('estado');
   var barra = document.getElementById('barra');
   function decir(texto, clase) { estado.textContent = texto; estado.className = clase || ''; }
-  function fin() { barra.hidden = true; input.disabled = false; input.value = ''; }
-  input.addEventListener('change', function () {
-    var f = input.files && input.files[0];
-    if (!f) return;
-    if (f.size > MAX) { decir('La foto es demasiado grande (máximo ' + Math.round(MAX / 1048576) + ' MB).', 'error'); input.value = ''; return; }
-    decir('Enviando la foto…'); barra.hidden = false; input.disabled = true;
-    fetch(UPLOAD, { method: 'POST', headers: { 'Content-Type': f.type || 'application/octet-stream', 'X-Filename': encodeURIComponent(f.name || 'foto') }, body: f })
-      .then(function (r) { return r.text().then(function (t) { return { ok: r.ok, texto: t }; }); })
-      .then(function (r) { decir(r.ok ? (r.texto || 'Foto recibida') + '. Ya puedes hacer otra.' : (r.texto || 'No se pudo enviar la foto.'), r.ok ? 'ok' : 'error'); })
-      .catch(function () { decir('No se pudo conectar con el ordenador. Comprueba que sigas en la misma wifi y que la subida siga activa.', 'error'); })
-      .then(fin);
-  });
+  function bloquear(si) { camara.disabled = si; galeria.disabled = si; barra.hidden = !si; }
+  function esperar(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function nombre(f) { return f.name || 'foto'; }
+  function subir(f, intento) {
+    return fetch(UPLOAD, { method: 'POST', headers: { 'Content-Type': f.type || 'application/octet-stream', 'X-Filename': encodeURIComponent(nombre(f)) }, body: f })
+      .then(function (r) {
+        var espera = Number(r.headers.get('Retry-After'));
+        if (r.status === 429 && espera > 0 && intento < REINTENTOS) {
+          return esperar(espera * 1000).then(function () { return subir(f, intento + 1); });
+        }
+        return r.text().then(function (t) { return { ok: r.ok, texto: t }; });
+      });
+  }
+  // Las fotos se envían de una en una: el ordenador las pasa por OCR en orden.
+  function enviar(lista) {
+    var fotos = Array.prototype.slice.call(lista || []);
+    if (!fotos.length) return;
+    var total = fotos.length, bien = 0, fallos = [];
+    bloquear(true);
+    var cadena = Promise.resolve();
+    fotos.forEach(function (f, i) {
+      cadena = cadena.then(function () {
+        if (f.size > MAX) { fallos.push(nombre(f) + ': es demasiado grande (máximo ' + Math.round(MAX / 1048576) + ' MB)'); return; }
+        decir(total > 1 ? 'Enviando foto ' + (i + 1) + ' de ' + total + '…' : 'Enviando la foto…');
+        return subir(f, 0).then(function (r) {
+          if (r.ok) bien++;
+          else fallos.push(nombre(f) + ': ' + (r.texto || 'no se pudo enviar').replace(/\\.+$/, ''));
+        });
+      });
+    });
+    cadena
+      .then(function () {
+        if (!fallos.length) decir(total > 1 ? bien + ' fotos recibidas. Ya puedes enviar más.' : 'Foto recibida. Ya puedes hacer otra.', 'ok');
+        else decir((bien ? bien + ' de ' + total + ' fotos recibidas. ' : '') + 'No se enviaron: ' + fallos.join('; ') + '.', 'error');
+      }, function () {
+        decir((bien ? bien + ' de ' + total + ' fotos recibidas. ' : '') + 'No se pudo conectar con el ordenador. Comprueba que sigas en la misma wifi y que la subida siga activa.', 'error');
+      })
+      .then(function () { bloquear(false); camara.value = ''; galeria.value = ''; });
+  }
+  camara.addEventListener('change', function () { enviar(camara.files); });
+  galeria.addEventListener('change', function () { enviar(galeria.files); });
 })();`
 
   return `<!doctype html>
@@ -38,7 +70,8 @@ export function renderUploadPage(opts: { uploadPath: string; nonce: string; maxB
 body{font:18px/1.45 system-ui,sans-serif;margin:0;padding:1.25rem;max-width:34rem;margin-inline:auto;color:#1b1b1b;background:#fff}
 h1{font-size:1.4rem;margin:0 0 .5rem}
 p{margin:.5rem 0}
-input[type=file]{display:block;width:100%;margin:1rem 0;padding:1rem;font-size:1rem;border:2px dashed #555;border-radius:.6rem;box-sizing:border-box}
+label{display:block;font-weight:600;margin-top:1rem}
+input[type=file]{display:block;width:100%;margin:.4rem 0 1rem;padding:1rem;font-size:1rem;border:2px dashed #555;border-radius:.6rem;box-sizing:border-box}
 progress{width:100%}
 #estado{min-height:1.5rem;font-weight:600}
 #estado.ok{color:#116611}
@@ -48,8 +81,11 @@ progress{width:100%}
 </head>
 <body>
 <h1>Enviar foto de apuntes</h1>
-<p>Haz una foto del apunte (o elige una de la galería). Se enviará solo a tu ordenador, por esta wifi.</p>
-<input id="foto" type="file" accept="image/*" capture="environment" aria-label="Hacer o elegir una foto">
+<p>Haz una foto del apunte o elige varias de la galería. Se envían solo a tu ordenador, por esta wifi.</p>
+<label for="foto">Hacer una foto</label>
+<input id="foto" type="file" accept="image/*" capture="environment">
+<label for="galeria">Elegir varias de la galería</label>
+<input id="galeria" type="file" accept="image/*" multiple>
 <progress id="barra" hidden></progress>
 <p id="estado" role="status" aria-live="polite"></p>
 <p class="pie">Esta conexión no está cifrada (HTTP): la foto viaja sin cifrar por tu wifi. Úsala solo en redes wifi de confianza.</p>

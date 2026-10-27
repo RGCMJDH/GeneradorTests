@@ -223,6 +223,52 @@ describe('generateQuestions', () => {
       expect(r2.reasons[0]).toContain('boom')
     })
 
+    it('{"sin_material":true} no se reintenta: una sola llamada para esa pregunta', async () => {
+      const { store, s, c1 } = await setup()
+      const llm = new FakeLlm([{ sin_material: true }, good(c1.id)])
+      const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'desarrollo', count: 1 })
+      expect(llm.calls).toBe(1)
+      expect(r.questions).toHaveLength(0)
+      expect(r.discarded).toBe(1)
+    })
+
+    it('un fragmento sin material no se vuelve a pedir en la misma generación', async () => {
+      const { store, s, c2 } = await setup()
+      const llm = new FakeLlm([
+        ({ user, n }: Call) => (user.includes(T1) ? { sin_material: true } : good(c2.id, { cita: Q2, enunciado: `Pregunta ${'x'.repeat(n)}` }))
+      ])
+      const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'desarrollo', count: 3 })
+      expect(llm.prompts.filter((p) => p.user.includes(T1))).toHaveLength(1)
+      expect(r.questions).toHaveLength(2)
+      expect(r.discarded).toBe(1)
+    })
+
+    it('si ningún fragmento tiene material se para sin más llamadas y cuenta el resto como descartado', async () => {
+      const { store, s } = await setup()
+      const llm = new FakeLlm([{ sin_material: true }])
+      const progress: number[] = []
+      const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'desarrollo', count: 5 }, (d) => progress.push(d))
+      expect(llm.calls).toBe(2) // un intento por cada uno de los 2 fragmentos
+      expect(r.questions).toHaveLength(0)
+      expect(r.discarded).toBe(5)
+      expect(r.insufficient).toBe(true)
+      expect(r.reasons.every((x) => /sin material/i.test(x))).toBe(true)
+      expect(progress.at(-1)).toBe(5)
+    })
+
+    it('el prompt solo lista las preguntas previas del mismo fragmento', async () => {
+      const { store, s, c1, c2 } = await setup()
+      const llm = new FakeLlm([
+        ({ user, n }: Call) =>
+          user.includes(T1) ? good(c1.id, { enunciado: `Sobre la mitocondria ${n}` }) : good(c2.id, { cita: Q2, enunciado: `Sobre el núcleo ${n}` })
+      ])
+      await generateQuestions({ llm, store }, { subjectId: s.id, type: 'desarrollo', count: 3 })
+      const third = llm.prompts[2].user // vuelve al fragmento 1
+      expect(third).toContain(T1)
+      expect(third).toContain('Sobre la mitocondria 1')
+      expect(third).not.toContain('Sobre el núcleo 2')
+    })
+
     it('{"sin_material":true} es descarte con razón "sin material"', async () => {
       const { store, s } = await setup()
       const llm = new FakeLlm([{ sin_material: true }])
@@ -354,7 +400,7 @@ describe('generateQuestions', () => {
 
     it('count > 50 se limita a 50', async () => {
       const { store, s } = await setup()
-      const llm = new FakeLlm([{ sin_material: true }])
+      const llm = new FakeLlm([{}]) // forma inválida: se reintenta, así cada pregunta cuesta sus 3 intentos
       const totals = new Set<number>()
       const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'desarrollo', count: 500 }, (_d, t) => totals.add(t))
       expect([...totals]).toEqual([50])
@@ -450,11 +496,9 @@ describe('generateQuestions', () => {
   describe('progreso y cancelación', () => {
     it('onProgress se llama una vez por pregunta (válida o no)', async () => {
       const { store, s, c1 } = await setup()
-      // pregunta 1 válida; pregunta 2 agota sus 3 intentos con sin_material; pregunta 3 válida
+      // pregunta 1 válida; pregunta 2 sin material (sin reintentos); pregunta 3 válida
       const llm = new FakeLlm([
         good(c1.id),
-        { sin_material: true },
-        { sin_material: true },
         { sin_material: true },
         ({ user }: Call) => (user.includes(T1) ? good(c1.id, { enunciado: '¿Qué es el ATP?' }) : good(c1.id + 1, { cita: Q2, enunciado: '¿Dónde está el ADN?' }))
       ])

@@ -1,6 +1,6 @@
 // __GT_DEV_MOCK__ — marcador para verificar que este archivo NO llega al paquete de producción.
 // `window.api` falso en memoria para previsualizar la interfaz en un navegador normal (solo `vite dev`).
-import type { Api, Chunk, Concept, DocumentInfo, GenerateOutcome, GenerateRequestDto, GradeResultDto, HistoryAttempt, ImportKind, MobileImageEvent, MobileStoppedEvent, Question, Result, Subject } from '../../shared/api'
+import type { Api, Chunk, Concept, DocumentInfo, GenerateOutcome, GenerateRequestDto, GradeResultDto, HistoryAttempt, ImportItem, ImportKind, MobileImageEvent, MobileStoppedEvent, Question, Result, Subject } from '../../shared/api'
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 const ok = <T>(data: T): Result<T> => ({ ok: true, data })
@@ -33,6 +33,12 @@ const hasExerciseMaterial = (t: string): boolean =>
 const CONCEPT_VOCAB = ['célula', 'membrana plasmática', 'mitocondrias', 'ATP', 'respiración celular', 'ley de Ohm', 'seres vivos', '<img src=x onerror=alert(1)>']
 const norm = (t: string): string => t.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim()
 const hasTerm = (text: string, term: string): boolean => ` ${norm(text)} `.includes(` ${norm(term)} `)
+
+const DEV_FILES: Record<ImportKind, string[]> = {
+  text: ['apuntes-ejemplo.md', 'tema-2.md'],
+  pdf: ['escaneo.pdf', 'apuntes.pdf'],
+  image: ['foto-1.png', 'foto-2.png']
+}
 
 export function createDevMockApi(): Api {
   let nextId = 100
@@ -137,7 +143,7 @@ export function createDevMockApi(): Api {
     })
   }
 
-  return {
+  const api: Api = {
     subjects: {
       list: async () => ok([...subjects]),
       create: async (name) => {
@@ -151,6 +157,19 @@ export function createDevMockApi(): Api {
       }
     },
     notes: {
+      // Simula elegir dos archivos en el diálogo; con PDF el primero sale sin texto (NO_TEXT) y el segundo bien.
+      importMany: async (subjectId, kind) => {
+        const items: ImportItem[] = []
+        for (const file of DEV_FILES[kind]) {
+          const r = await api.notes.import(subjectId, kind)
+          if (!r.ok) items.push({ file, ok: false, error: r.error, code: r.code ?? 'INTERNAL' })
+          else if (!r.data.canceled) {
+            const { canceled: _c, ...done } = r.data
+            items.push({ file, ok: true, ...done })
+          }
+        }
+        return ok({ canceled: false as const, items })
+      },
       import: async (subjectId, kind) => {
         await delay(kind === 'image' ? 1500 : 500)
         if (kind === 'text') return ok({ canceled: false as const, kind, document: addDoc(subjectId, 'apuntes-ejemplo.md', 'text', SAMPLE) })
@@ -355,6 +374,7 @@ export function createDevMockApi(): Api {
       config: async () => ok({ model: 'qwen2.5:7b' })
     }
   }
+  return api
 }
 
 export const DEV_MOCK_MARKER = '__GT_DEV_MOCK__'

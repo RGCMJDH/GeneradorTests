@@ -36,7 +36,9 @@ describe('OllamaProvider.generateJson', () => {
     expect(body.model).toBe('qwen2.5:7b')
     expect(body.stream).toBe(false)
     expect(body.format).toBe('json')
-    expect(body.options).toEqual({ temperature: 0.2 })
+    // Velocidad en CPU: el modelo sigue cargado entre peticiones y la respuesta tiene un tope.
+    expect(body.keep_alive).toBe('30m')
+    expect(body.options).toEqual({ temperature: 0.2, num_ctx: 4096, num_predict: 1024 })
     expect(body.messages).toEqual([
       { role: 'system', content: 'SYS' },
       { role: 'user', content: 'USR' }

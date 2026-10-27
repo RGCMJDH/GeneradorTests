@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ConfirmOcrOutcome, DocumentInfo, ImportKind } from '../../../shared/api'
+import type { ConfirmOcrOutcome, DocumentInfo, ImportItem, ImportKind } from '../../../shared/api'
 import { Alert, Busy, Status } from '../components/Alert'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { UNEXPECTED_ERROR } from '../errors'
@@ -17,14 +17,35 @@ const BUTTONS: { kind: ImportKind; label: string }[] = [
 ]
 
 const BUSY_TEXT: Record<ImportKind, string> = {
-  text: 'Importando el archivo…',
-  pdf: 'Leyendo el PDF…',
-  image: 'Leyendo la imagen con OCR… puede tardar hasta un minuto.'
+  text: 'Importando…',
+  pdf: 'Leyendo los PDF…',
+  image: 'Leyendo las fotos con OCR… puede tardar hasta un minuto por foto.'
 }
 
-const NO_TEXT_MESSAGE =
-  'Este PDF no contiene texto seleccionable (probablemente es un escaneo). El OCR de esta aplicación solo funciona con imágenes, ' +
-  'así que no se puede pasar un PDF por OCR directamente. Exporta sus páginas como imágenes (PNG o JPG) e impórtalas con «Importar foto».'
+const NO_TEXT_REASON = 'no contiene texto seleccionable (probablemente es un escaneo)'
+const NO_TEXT_HELP =
+  'El OCR de esta aplicación solo funciona con imágenes, así que no se puede pasar un PDF por OCR directamente. ' +
+  'Exporta sus páginas como imágenes (PNG o JPG) e impórtalas con «Importar foto».'
+
+type Failed = Extract<ImportItem, { ok: false }>
+type ImportedDoc = Extract<ImportItem, { ok: true; kind: 'text' | 'pdf' }>
+
+/** Resumen de los archivos importados con texto (los de fotos van a la revisión OCR). */
+function importedSummary(done: ImportedDoc[]): string {
+  const warnings = done.filter((d) => d.warning).map((d) => ` Aviso en «${d.document.title}»: ${d.warning}`)
+  const head =
+    done.length === 1
+      ? `«${done[0].document.title}» importado: ${fragmentos(done[0].document.chunkCount)}.`
+      : `${done.length} archivos importados: ${done.map((d) => `«${d.document.title}» (${fragmentos(d.document.chunkCount)})`).join(', ')}.`
+  return head + warnings.join('')
+}
+
+/** Qué archivos no se importaron y por qué. Un PDF escaneado lleva además la explicación de qué hacer. */
+function failureMessage(failed: Failed[]): string {
+  const head = failed.length === 1 ? 'No se pudo importar' : `${failed.length} archivos no se importaron`
+  const list = failed.map((f) => `${f.file}: ${f.code === 'NO_TEXT' ? NO_TEXT_REASON : f.error}`).join('; ')
+  return `${head}: ${list}.` + (failed.some((f) => f.code === 'NO_TEXT') ? ` ${NO_TEXT_HELP}` : '')
+}
 
 export type { Blocking }
 
@@ -94,20 +115,27 @@ export default function Notes({ subject, onBlockingChange }: Props) {
     setOcr({ documentId: next.documentId, text: next.text, missing: false })
   }, [queued, busy, ocr])
 
-  async function importFile(kind: ImportKind): Promise<void> {
+  // Se pueden elegir varios archivos a la vez: cada uno trae su resultado y uno que falla no frena a los demás.
+  async function importFiles(kind: ImportKind): Promise<void> {
     setBusy(kind)
     setError(null)
     setStatus('')
     try {
-      const res = await window.api.notes.import(sid, kind)
-      if (!res.ok) return setError(res.code === 'NO_TEXT' ? NO_TEXT_MESSAGE : res.error)
-      const out = res.data
-      if (out.canceled) return
-      if (out.kind === 'image') {
-        setOcr({ documentId: out.documentId, text: out.ocrText, missing: false })
-      } else {
-        setStatus(`«${out.document.title}» importado: ${fragmentos(out.document.chunkCount)}.${out.warning ? ` Aviso: ${out.warning}` : ''}`)
-      }
+      const res = await window.api.notes.importMany(sid, kind)
+      if (!res.ok) return setError(res.error)
+      if (res.data.canceled) return
+      const { items } = res.data
+      const docsDone = items.filter((i): i is ImportedDoc => i.ok && i.kind !== 'image')
+      const photos = items.flatMap((i) => (i.ok && i.kind === 'image' ? [{ documentId: i.documentId, text: i.ocrText }] : []))
+      const failed = items.filter((i): i is Failed => !i.ok)
+      // Las fotos pasan por la misma cola de revisión que las del móvil: se revisan de una en una.
+      if (photos.length > 0) setQueued((q) => [...q, ...photos])
+      const parts = [
+        docsDone.length > 0 ? importedSummary(docsDone) : '',
+        photos.length > 1 ? `${photos.length} fotos leídas: revisa el texto de cada una antes de trocearlo.` : ''
+      ]
+      setStatus(parts.filter(Boolean).join(' '))
+      if (failed.length > 0) setError(failureMessage(failed))
       await refresh()
     } catch {
       setError(UNEXPECTED_ERROR)
@@ -157,11 +185,12 @@ export default function Notes({ subject, onBlockingChange }: Props) {
         <h3 id="notes-import">Importar apuntes</h3>
         <div className="row">
           {BUTTONS.map((b) => (
-            <button key={b.kind} type="button" className="btn btn--primary" disabled={busy !== null || ocr !== null} onClick={() => void importFile(b.kind)}>
+            <button key={b.kind} type="button" className="btn btn--primary" disabled={busy !== null || ocr !== null} onClick={() => void importFiles(b.kind)}>
               {b.label}
             </button>
           ))}
         </div>
+        <p className="muted">Puedes elegir varios archivos a la vez.</p>
         {busy ? <Busy>{BUSY_TEXT[busy]}</Busy> : <Status>{status}</Status>}
         <Alert>{error}</Alert>
       </section>
@@ -170,8 +199,7 @@ export default function Notes({ subject, onBlockingChange }: Props) {
 
       {ocr && queued.length > 0 && (
         <p role="note" className="notice">
-          {queued.length === 1 ? '1 foto más recibida del móvil esperando revisión' : `${queued.length} fotos más recibidas del móvil esperando revisión`}: se abrirá al terminar esta
-          revisión.
+          {queued.length === 1 ? '1 foto más esperando revisión' : `${queued.length} fotos más esperando revisión`}: se abrirá al terminar esta revisión.
         </p>
       )}
 

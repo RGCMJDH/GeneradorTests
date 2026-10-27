@@ -2,8 +2,18 @@ import { join } from 'node:path'
 import type { OcrOptions } from '@core/ocr'
 import type { Doc } from '@core/types'
 import { NoTextError } from '@core/ingest'
-import { channels, type ChunkView, type ConfirmOcrOutcome, type DocumentInfo, type ImportKind, type ImportOutcome } from '../../shared/api'
-import { handle, invalid, IpcError, notFound } from './common'
+import {
+  channels,
+  MAX_IMPORT_FILES,
+  type ChunkView,
+  type ConfirmOcrOutcome,
+  type DocumentInfo,
+  type ImportItem,
+  type ImportKind,
+  type ImportManyOutcome,
+  type ImportOutcome
+} from '../../shared/api'
+import { handle, invalid, IpcError, notFound, toFailure } from './common'
 import type { IpcContext, Registrar } from './context'
 import { requireSubject } from './subjects'
 import { arity, id, MAX_NOTES_TEXT, oneOf, optId, str } from './validate'
@@ -50,13 +60,10 @@ export async function ingestImageFromPath(
   return { documentId: document.id, ocrText }
 }
 
-async function importFromDialog(ctx: IpcContext, subjectId: number, kind: ImportKind): Promise<ImportOutcome> {
-  requireSubject(ctx, subjectId)
-  const d = DIALOGS[kind]
-  const picked = await ctx.dialog.showOpenDialog({ title: d.title, properties: ['openFile'], filters: d.filters })
-  const path = picked.filePaths[0]
-  if (picked.canceled || path === undefined) return { canceled: true }
+type Imported = Exclude<ImportOutcome, { canceled: true }>
 
+/** Importa un archivo ya elegido en el diálogo de main. */
+async function importPath(ctx: IpcContext, subjectId: number, kind: ImportKind, path: string): Promise<Imported> {
   if (kind === 'image') return { canceled: false, kind, ...(await ingestImageFromPath(ctx, subjectId, path)) }
   try {
     const run = kind === 'pdf' ? ctx.core.importPdf : ctx.core.importTextFile
@@ -73,12 +80,55 @@ async function importFromDialog(ctx: IpcContext, subjectId: number, kind: Import
   }
 }
 
+async function importFromDialog(ctx: IpcContext, subjectId: number, kind: ImportKind): Promise<ImportOutcome> {
+  requireSubject(ctx, subjectId)
+  const d = DIALOGS[kind]
+  const picked = await ctx.dialog.showOpenDialog({ title: d.title, properties: ['openFile'], filters: d.filters })
+  const path = picked.filePaths[0]
+  if (picked.canceled || path === undefined) return { canceled: true }
+  return importPath(ctx, subjectId, kind, path)
+}
+
+/** Solo el nombre del archivo: el renderer nunca recibe rutas. Vale para rutas de Windows y POSIX. */
+const fileName = (path: string): string => path.split(/[\\/]/).pop() ?? path
+
+/**
+ * Varios archivos de una vez. Se importan en serie (el OCR ya es serie) y cada uno da su resultado:
+ * un archivo que falla no detiene los demás ni deshace los ya importados.
+ */
+async function importManyFromDialog(ctx: IpcContext, subjectId: number, kind: ImportKind): Promise<ImportManyOutcome> {
+  requireSubject(ctx, subjectId)
+  const d = DIALOGS[kind]
+  const picked = await ctx.dialog.showOpenDialog({ title: d.title, properties: ['openFile', 'multiSelections'], filters: d.filters })
+  if (picked.canceled || picked.filePaths.length === 0) return { canceled: true }
+  if (picked.filePaths.length > MAX_IMPORT_FILES) {
+    throw invalid(`Has elegido ${picked.filePaths.length} archivos; como máximo se pueden importar ${MAX_IMPORT_FILES} de una vez.`)
+  }
+  const items: ImportItem[] = []
+  for (const path of picked.filePaths) {
+    const file = fileName(path)
+    try {
+      const { canceled: _canceled, ...done } = await importPath(ctx, subjectId, kind, path)
+      items.push({ file, ok: true, ...done })
+    } catch (e) {
+      const f = toFailure(e)
+      items.push({ file, ok: false, error: f.error, code: f.code ?? 'INTERNAL' })
+    }
+  }
+  return { canceled: false, items }
+}
+
 export function registerNotes(ctx: IpcContext, r: Registrar): void {
   const { store } = ctx
 
   handle(r, channels.notesImport, (_e, args) => {
     arity(args, 2)
     return importFromDialog(ctx, id(args[0], 'subjectId'), oneOf(args[1], KINDS, 'El tipo de importación'))
+  })
+
+  handle(r, channels.notesImportMany, (_e, args) => {
+    arity(args, 2)
+    return importManyFromDialog(ctx, id(args[0], 'subjectId'), oneOf(args[1], KINDS, 'El tipo de importación'))
   })
 
   handle(r, channels.notesConfirmOcr, (_e, args): ConfirmOcrOutcome => {

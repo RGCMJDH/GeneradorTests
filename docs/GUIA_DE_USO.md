@@ -30,6 +30,8 @@ Dentro de una asignatura, en la pestaña **Apuntes**, sección **Importar apunte
 - **Importar PDF**: solo PDF con texto seleccionable. Si el PDF es un escaneo y no tiene texto, la app te lo dirá; en ese caso exporta las páginas como imágenes y usa **Importar foto**.
 - **Importar foto**: fotos de tus apuntes (JPG, PNG, WebP, GIF, BMP o TIFF). Pasan por reconocimiento de texto (OCR).
 
+En el diálogo puedes **elegir varios archivos a la vez** (hasta 50) con Ctrl o Mayús. Se importan uno detrás de otro. Si alguno falla, por ejemplo un PDF escaneado, los demás se importan igual y la app te dice cuáles fallaron y por qué. Con varias fotos, la revisión del texto se abre para cada una, de una en una.
+
 Consejos para las fotos:
 
 - Buena luz, sin sombras, papel plano y letra clara. La escritura a mano se reconoce mal.
@@ -49,8 +51,10 @@ En la pestaña **Apuntes**, sección **Fotos desde el móvil**, pulsa **Subir de
 
 1. Aparece un código QR y un enlace. Escanea el QR con el móvil.
 2. El móvil y el PC deben estar en **la misma wifi**. Si no conecta, permite la app en el Firewall de Windows para redes privadas.
-3. Haz la foto desde el móvil en la página que se abre y envíala.
-4. La foto aparece en el PC para revisar el texto, igual que las importadas desde el archivo.
+3. En la página que se abre, usa **Hacer una foto** para la cámara o **Elegir varias de la galería** para enviar muchas de golpe. Se envían una detrás de otra y la página te dice cuántas han llegado.
+4. Las fotos aparecen en el PC para revisar el texto, igual que las importadas desde el archivo, de una en una.
+
+Si el PC todavía está leyendo fotos anteriores, el móvil espera y reenvía solo. Por sesión se pueden enviar hasta 20 fotos; para más, pulsa **Detener** y vuelve a empezar.
 
 Ten en cuenta:
 
@@ -121,7 +125,7 @@ Pestaña **Historial**. Cada intento aparece con su fecha, su puntuación y su n
 ## Qué hacer si algo falla
 
 - **«Ollama no está disponible»** o **«No se pudo contactar con el modelo de IA»**: comprueba que Ollama está abierto y que el modelo está descargado (`ollama list`). Luego pulsa **Reintentar**.
-- **La generación tarda mucho**: es normal en CPU. Usa menos preguntas, o cancela y prueba con un tema más concreto.
+- **La generación tarda mucho**: es normal en CPU. La primera pregunta tarda más porque Ollama carga el modelo en memoria; después se mantiene cargado 30 minutos. Usa menos preguntas, o cancela y prueba con un tema más concreto. Si sigue siendo lento, puedes usar un modelo más pequeño y rápido, como `qwen2.5:3b`, aunque se equivoca más (ver el README).
 - **Muchas preguntas descartadas**: el modelo no encontró citas válidas en el fragmento. Prueba con un tema más concreto o con apuntes mejor escritos.
 - **Una foto sale mal reconocida**: corrige el texto en la revisión antes de confirmar. Para mejorar el resultado, haz la foto con más luz y más cerca.
 - **El móvil no conecta**: confirma que está en la misma wifi y que el Firewall de Windows permite la app en redes privadas.
