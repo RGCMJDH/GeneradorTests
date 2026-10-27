@@ -87,7 +87,7 @@ npm run pack    # empaquetado en release/win-unpacked/ (sin instalador)
 npm run dist    # instalador y portable .exe en release/ (en Windows)
 ```
 
-Para publicar una versión nueva, sube una etiqueta `vX.Y.Z` (por ejemplo `git tag v1.0.1 && git push origin v1.0.1`). GitHub compila los `.exe` y los publica en Releases.
+Para publicar una versión nueva, cambia `version` en `package.json` (por ejemplo a `1.0.1`) y fusiónalo en `main`. GitHub compila los `.exe` y, si esa versión aún no está publicada, crea la Release `v1.0.1` con ellos.
 
 Pasos para usarla:
 
