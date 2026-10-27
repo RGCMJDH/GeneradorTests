@@ -14,6 +14,11 @@ export class ModelUnavailableError extends Error {
 const DEFAULT_BASE_URL = 'http://localhost:11434'
 const DEFAULT_MODEL = 'qwen2.5:7b'
 const DEFAULT_HEALTH_TIMEOUT_MS = 3000
+// Velocidad en CPU: recargar el modelo (~5 GB) tras 5 min de inactividad (lo que hace Ollama por defecto)
+// cuesta mucho; se mantiene cargado 30 min. El contexto se fija (un fragmento cabe de sobra) y la
+// respuesta tiene un tope: una pregunta en JSON ocupa ~300 tokens y así una respuesta desbocada no dura minutos.
+const KEEP_ALIVE = '30m'
+const GENERATION_OPTIONS = { temperature: 0.2, num_ctx: 4096, num_predict: 1024 }
 
 /** Devuelve el índice (inclusive) donde cierra el valor JSON que empieza en `start`, o -1. */
 function findBalancedEnd(text: string, start: number): number {
@@ -119,7 +124,8 @@ export class OllamaProvider implements LlmProvider {
           ],
           stream: false,
           format: 'json',
-          options: { temperature: 0.2 }
+          keep_alive: KEEP_ALIVE,
+          options: GENERATION_OPTIONS
         })
       })
     } catch (e) {

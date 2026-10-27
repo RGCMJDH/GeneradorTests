@@ -79,12 +79,12 @@ type Parsed = { ok: true; value: Omit<Question, 'id' | 'subjectId'> } | { ok: fa
 
 const fail = (reason: string): Parsed => ({ ok: false, reason })
 const isStr = (v: unknown): v is string => typeof v === 'string'
+const isObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v)
 
 /** Valida la forma de la respuesta del modelo; no confía en nada. La cita se verifica aparte. */
 function parseResponse(raw: unknown, type: QuestionType, sentChunkId: number): Parsed {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return fail('respuesta no es un objeto JSON')
   const o = raw as Record<string, unknown>
-  if (o.sin_material === true) return fail('sin material')
   if (!isStr(o.enunciado) || o.enunciado.trim() === '') return fail('falta el enunciado')
   if (!isStr(o.respuesta)) return fail('falta la respuesta')
   if (!isStr(o.explicacion)) return fail('falta la explicación')
@@ -163,8 +163,12 @@ export async function generateQuestions(
   const total = Math.min(req.count, MAX_COUNT)
   const questions: Question[] = []
   const reasons: string[] = []
-  const previous: string[] = []
+  // Preguntas ya guardadas por fragmento: el prompt solo lista las del fragmento que se envía
+  // (las de otros fragmentos no se parecen y solo alargarían el prompt; los duplicados se filtran igual).
+  const previousByChunk = new Map<number, string[]>()
   const seen = new Set<string>()
+  // Fragmentos para los que el modelo dijo {"sin_material":true}: no se le vuelven a pedir en esta generación.
+  const barren = new Set<number>()
   let discarded = 0
   let aborted = false
   let saveFailed = false
@@ -179,9 +183,18 @@ export async function generateQuestions(
   }
 
   for (let i = 0; i < total && !aborted && !saveFailed; i++) {
-    // Rotación: las preguntas se reparten por el material. Un único fragmento por prompt.
-    const chunk = chunks[i % chunks.length]
-    const user = buildUserPrompt(req.type, chunk, previous)
+    // Rotación: las preguntas se reparten por el material útil. Un único fragmento por prompt.
+    const pool = chunks.filter((c) => !barren.has(c.id))
+    if (pool.length === 0) {
+      // Ningún fragmento tiene material: las pendientes se descartan sin más llamadas al modelo.
+      const rest = total - i
+      discarded += rest
+      reasons.push(`sin material en ningún fragmento: ${rest} ${rest === 1 ? 'pregunta no se intentó' : 'preguntas no se intentaron'}`)
+      progress(total)
+      break
+    }
+    const chunk = pool[i % pool.length]
+    const user = buildUserPrompt(req.type, chunk, previousByChunk.get(chunk.id) ?? [])
     let reason = 'sin intentos'
     let saved: Question | undefined
 
@@ -206,6 +219,12 @@ export async function generateQuestions(
       modelReached = true
       if (signal?.aborted) {
         aborted = true
+        break
+      }
+      // El modelo dice que el fragmento no da para una pregunta: reintentar costaría otra llamada para nada.
+      if (isObject(raw) && raw.sin_material === true) {
+        barren.add(chunk.id)
+        reason = 'sin material'
         break
       }
       const parsed = parseResponse(raw, req.type, chunk.id)
@@ -244,7 +263,7 @@ export async function generateQuestions(
     if (aborted) break
     if (saved) {
       questions.push(saved)
-      previous.push(saved.prompt)
+      previousByChunk.set(chunk.id, [...(previousByChunk.get(chunk.id) ?? []), saved.prompt])
       seen.add(normalize(saved.prompt))
     } else {
       reasons.push(reason)
