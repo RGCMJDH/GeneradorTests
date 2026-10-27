@@ -41,8 +41,8 @@ jobs:
             $tag = 'v' + (node -p "require('./package.json').version")
             "tag=$tag" >> $env:GITHUB_OUTPUT
             $exists = git ls-remote --tags origin "refs/tags/$tag"
-            if ($exists) { "publish=false" >> $env:GITHUB_OUTPUT; "Ya existe $tag: no se publica." }
-            else { "publish=true" >> $env:GITHUB_OUTPUT; "Se publicará $tag." }
+            if ($exists) { "publish=false" >> $env:GITHUB_OUTPUT; "Ya existe ${tag}: no se publica." }
+            else { "publish=true" >> $env:GITHUB_OUTPUT; "Se publicará ${tag}." }
           } else {
             "publish=false" >> $env:GITHUB_OUTPUT
           }
