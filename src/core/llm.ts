@@ -3,9 +3,22 @@ export interface LlmProvider {
   health(): Promise<{ ok: boolean; message: string }>
 }
 
+/**
+ * No se llegó al modelo: Ollama no responde o el modelo no está instalado.
+ * Distinto de un modelo que sí contesta pero mal (sin JSON, error 500…), que lanza un Error normal.
+ */
+export class ModelUnavailableError extends Error {
+  override name = 'ModelUnavailableError'
+}
+
 const DEFAULT_BASE_URL = 'http://localhost:11434'
 const DEFAULT_MODEL = 'qwen2.5:7b'
 const DEFAULT_HEALTH_TIMEOUT_MS = 3000
+// Velocidad en CPU: recargar el modelo (~5 GB) tras 5 min de inactividad (lo que hace Ollama por defecto)
+// cuesta mucho; se mantiene cargado 30 min. El contexto se fija (un fragmento cabe de sobra) y la
+// respuesta tiene un tope: una pregunta en JSON ocupa ~300 tokens y así una respuesta desbocada no dura minutos.
+const KEEP_ALIVE = '30m'
+const GENERATION_OPTIONS = { temperature: 0.2, num_ctx: 4096, num_predict: 1024 }
 
 /** Devuelve el índice (inclusive) donde cierra el valor JSON que empieza en `start`, o -1. */
 function findBalancedEnd(text: string, start: number): number {
@@ -111,12 +124,13 @@ export class OllamaProvider implements LlmProvider {
           ],
           stream: false,
           format: 'json',
-          options: { temperature: 0.2 }
+          keep_alive: KEEP_ALIVE,
+          options: GENERATION_OPTIONS
         })
       })
     } catch (e) {
       if (isAbort(e)) throw cancelled()
-      throw new Error(
+      throw new ModelUnavailableError(
         `No se pudo conectar con Ollama en ${this.baseUrl}. Comprueba que esté en ejecución (ollama serve). Detalle: ${errMsg(e)}`
       )
     }
@@ -126,7 +140,8 @@ export class OllamaProvider implements LlmProvider {
         res.status === 404
           ? ` Comprueba que el modelo ${this.model} esté instalado (ollama pull ${this.model}).`
           : ''
-      throw new Error(`Ollama respondió con error ${res.status}${detail ? `: ${detail}` : ''}.${hint}`)
+      const message = `Ollama respondió con error ${res.status}${detail ? `: ${detail}` : ''}.${hint}`
+      throw res.status === 404 ? new ModelUnavailableError(message) : new Error(message)
     }
     let data: unknown
     try {

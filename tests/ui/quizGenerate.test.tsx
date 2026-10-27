@@ -192,6 +192,20 @@ describe('Test: resultado de la generación', () => {
     expect(screen.getByText(/2 preguntas sin cita no se muestran/)).toBeInTheDocument()
   })
 
+  it('modelo no disponible → lo dice y no culpa a los apuntes', async () => {
+    const reasons = ['error del modelo: No se pudo conectar con Ollama', 'error del modelo: No se pudo conectar con Ollama']
+    setup({ generate: vi.fn(() => okR(outcome([], { discarded: 2, reasons, modelUnavailable: true }))) })
+    await userEvent.click(screen.getByRole('button', { name: 'Generar' }))
+    expect(await screen.findByText(/No se pudo contactar con el modelo de IA/)).toBeInTheDocument()
+    expect(screen.getByText(/Ollama/, { selector: 'p' })).toBeInTheDocument()
+    expect(screen.queryByText(/No hay material suficiente/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/no se pudieron respaldar/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/No se generó ninguna pregunta/)).not.toBeInTheDocument()
+    const list = screen.getByRole('list', { name: 'Motivos del descarte' })
+    expect(within(list).getAllByRole('listitem')).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: 'Empezar el test' })).not.toBeInTheDocument()
+  })
+
   it('sin preguntas, sin descartes y sin insufficient → línea genérica', async () => {
     setup({ generate: vi.fn(() => okR(outcome([]))) })
     await userEvent.click(screen.getByRole('button', { name: 'Generar' }))

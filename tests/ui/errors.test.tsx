@@ -14,8 +14,8 @@ const reject = () => vi.fn(() => Promise.reject(new Error('IPC roto')))
 const subject = { id: 7, name: 'Biología' }
 
 describe('S1: una promesa rechazada no bloquea la interfaz', () => {
-  it('Notes.importFile', async () => {
-    installApi({ notes: { import: reject() as never } })
+  it('Notes.importFiles', async () => {
+    installApi({ notes: { importMany: reject() as never } })
     render(<Notes subject={subject} />)
     await userEvent.click(await screen.findByRole('button', { name: /Importar PDF/ }))
     expect(await screen.findByRole('alert')).toHaveTextContent(/error inesperado/i)

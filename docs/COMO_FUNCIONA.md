@@ -33,6 +33,8 @@ Todas las consultas que reciben un identificador filtran por asignatura. Escribi
 
 ## 3. De un apunte a fragmentos
 
+Los archivos se eligen en el diálogo nativo del proceso principal, que admite **varios a la vez** (hasta 50, `notes:importMany`). Se importan en serie y cada uno devuelve su resultado: uno que falla no detiene los demás ni deshace los ya importados. La interfaz solo recibe el nombre de cada archivo, nunca la ruta.
+
 ### Texto y Markdown
 Se leen como UTF-8, se quita el BOM y se normalizan los saltos de línea. El título es el nombre del archivo.
 
@@ -55,24 +57,30 @@ Este es el paso donde la promesa «no se inventa nada» se aplica. El flujo est�
 2. **Petición al modelo.** Cada pregunta se pide con **un único fragmento** en el mensaje. El texto de los apuntes va entre delimitadores aleatorios, por si contiene instrucciones, y el mensaje de sistema dice al modelo que trate ese texto como datos y no como órdenes. El modelo debe responder en JSON, con el enunciado, la respuesta, la explicación, el `chunkId` del fragmento y una `cita` literal.
 3. **Validación de la forma.** La respuesta se trata como texto no fiable: se comprueba que es un objeto, que cada campo tiene el tipo esperado, que el `chunkId` es exactamente el del fragmento enviado, y que las opciones de un test son cuatro y distintas, con la respuesta entre ellas.
 4. **Verificación de la cita.** Esta es la comprobación central: la cita se busca **en el texto guardado del fragmento**, nunca en el texto que devuelve el modelo. Ver la sección 5.
-5. **Reintentos.** Si algo falla (forma inválida, cita no encontrada, pregunta repetida), se vuelve a pedir, como máximo dos veces más.
-6. **Guardado.** Solo las preguntas que pasan todas las comprobaciones se guardan. El resumen indica cuántas se descartaron y por qué. Si un guardado falla, la generación se detiene y devuelve lo que ya estaba guardado.
+5. **Números de los ejercicios prácticos.** En un práctico, los datos y el resultado no son una cita literal. Por eso cada número del enunciado (los datos) y de la respuesta (el resultado) tiene que aparecer en el fragmento tal cual, con el mismo signo y el mismo separador decimal. La explicación no se comprueba, porque suele traer pasos numerados y cálculos intermedios. En verdadero/falso y en test no se exige, porque una afirmación falsa o una opción incorrecta pueden cambiar una cifra a propósito.
+6. **Reintentos.** Si algo falla (forma inválida, cita no encontrada, número inventado, pregunta repetida), se vuelve a pedir, como máximo dos veces más. Si el modelo responde `{"sin_material":true}`, no se reintenta y ese fragmento no se vuelve a pedir en la misma generación; si ya no queda ninguno con material, la generación se para sin más llamadas.
+   Para que los prompts sean cortos, cada uno solo lista las preguntas ya generadas a partir del mismo fragmento.
+7. **Guardado.** Solo las preguntas que pasan todas las comprobaciones se guardan. El resumen indica cuántas se descartaron y por qué. Si un guardado falla, la generación se detiene y devuelve lo que ya estaba guardado.
+8. **Modelo no disponible.** Si no se llega al modelo en ningún intento (Ollama apagado o el modelo sin descargar), el resultado lo dice así, con `modelUnavailable`, y no como «sin material suficiente». Si el modelo sí contesta pero con una respuesta que no sirve, cuenta como descarte normal. Un fallo al guardar tampoco se presenta como falta de material.
 
 Cancelar una generación es seguro: las preguntas ya validadas se conservan y el resto no se guarda.
 
 ## 5. La verificación de la cita
 
-Está en `src/core/verify.ts` y `src/core/normalize.ts`.
+Está en `src/core/verify.ts`.
 
-- Antes de comparar, cita y fragmento se **normalizan**: se pasa a minúsculas, se quitan las tildes, la puntuación y los símbolos se convierten en espacios, y se colapsan los espacios.
-- La cita debe tener al menos **8 caracteres** tras normalizar. Esto evita que una palabra suelta pase como respaldo.
-- La cita es válida si, normalizada, aparece como subcadena del texto normalizado del fragmento.
+- Cita y fragmento se dividen en **piezas**: palabras, números (con su signo y su separador decimal, como `-5` o `2,5`) y operadores (`=`, `<`, `>`, `≠`, `+`, `·`…).
+- Se toleran las diferencias que no cambian el sentido: mayúsculas, tildes, ligaduras de PDF (`ﬁ` → `fi`), espacios, la puntuación de la prosa y las distintas variantes Unicode del signo menos.
+- Los superíndices son exponentes: `3²` equivale a `3^2` (no a `32`) y `10⁻³` a `10^-3`. Las fracciones como `½` equivalen a `1/2`.
+- La cita debe tener al menos **8 caracteres**. Esto evita que una palabra suelta pase como respaldo.
+- La cita es válida si sus piezas aparecen **seguidas y completas** en el fragmento. No puede empezar ni acabar a mitad de una palabra o de un número.
 
 Lo que esto **prueba**: que ese pasaje existe en tus apuntes. Lo que **no prueba**:
 
 - que la pregunta esté bien planteada ni que la respuesta sea la correcta;
-- que el modelo haya entendido el pasaje;
-- que los símbolos y los números coincidan. Como los símbolos se ignoran, `x = -5` y `x = 5` se consideran iguales, y también `2,5` y `2.5`. Es la debilidad conocida más importante, sobre todo en ejercicios con números.
+- que el modelo haya entendido el pasaje.
+
+Sí distingue `x = -5` de `x = 5`, `2,5` de `2.5`, `a < b` de `a > b` y `=` de `≠`.
 
 ## 6. Corrección y feedback
 
@@ -80,6 +88,7 @@ Está en `src/core/grade.ts`.
 
 - **Verdadero/falso y test**: la corrección es determinista, sin modelo. El feedback es la explicación guardada con la pregunta.
 - **Desarrollo y ejercicios**: el modelo compara tu respuesta con la referencia y da un veredicto y una cita. Si la cita no se puede verificar, se usa la cita original de la pregunta, que sí fue verificada al crearla, y el texto del feedback lo indica con la marca «(cita del modelo no verificada)».
+- En los **ejercicios**, si el feedback trae números que no están ni en el fragmento, ni en la pregunta guardada, ni en tu respuesta, se marca con «(cifras del modelo no verificadas…)». La cita del modelo se verifica igualmente.
 - La interfaz solo muestra la insignia «Cita verificada en tus apuntes» en el bloque de la cita y solo cuando la verificación fue correcta. El texto del feedback nunca lleva esa insignia.
 
 ## 7. Índice de conceptos
@@ -98,13 +107,16 @@ Está en `src/core/llm.ts`. La app habla con Ollama en `http://localhost:11434` 
 
 Las llamadas no tienen tiempo máximo propio, porque un modelo local en CPU puede tardar minutos. Se pueden cancelar con la señal de cancelación que atraviesa generación, corrección y conceptos.
 
+Para que vaya más rápido en CPU, cada petición pide a Ollama mantener el modelo cargado 30 minutos (`keep_alive`; por defecto lo descarga a los 5 y recargarlo cuesta), fija el contexto en 4096 tokens y limita la respuesta a 1024 tokens (`num_predict`), de sobra para una pregunta en JSON.
+
 ## 9. Subida desde el móvil
 
 Está en `src/core/mobile.ts` y `src/main/ipc/mobile.ts`. Es lo único de la app que escucha en la red.
 
 - Se abre un servidor HTTP en la **IP de la wifi** (nunca en todas las interfaces) en un puerto aleatorio, con una ruta que lleva un token aleatorio de 128 bits. Cualquier otra ruta, un token incorrecto o una petición con un `Host` distinto del anunciado recibe un 404 vacío, igual en todos los casos.
 - La foto se lee en streaming con un tope de 15 MB: al superarlo se corta la conexión. Se verifica el tipo por los bytes y se rechazan las resoluciones mayores de 40 millones de píxeles.
-- Como máximo hay 20 subidas por sesión y la sesión dura 10 minutos.
+- Como máximo hay 20 subidas por sesión y la sesión dura 10 minutos. La página permite elegir varias fotos de la galería y las envía de una en una.
+- Si la cola de OCR está llena o hay demasiadas subidas a la vez, el servidor responde 429 con `Retry-After: 5` y la página espera y reenvía la misma foto. El tope de la sesión responde 429 sin `Retry-After`: es definitivo.
 - La foto se guarda en una carpeta temporal con un nombre generado, se reconoce en una cola que procesa **una cada vez** (hasta 5 pendientes), y el archivo se borra al terminar. Al cerrar la app, las fotos en cola se borran sin procesarse.
 - La conexión es **HTTP sin cifrar**. Por eso la sesión es corta y el enlace no debe compartirse.
 

@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { detectImageType } from '@core/imageType'
 import { bmp, jpeg, png as pngImage } from './imageBuilders'
-import { pickLanAddress, sanitizeFilename, startUploadServer, tokenMatches } from '@core/mobile'
+import { pickLanAddress, sanitizeFilename, startUploadServer, tokenMatches, UploadRejected } from '@core/mobile'
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url))
 const FOTO = readFileSync(join(ROOT, 'tests/fixtures/foto-apuntes.png'))
@@ -201,6 +201,16 @@ describe('página de subida', () => {
     expect(r.text).not.toMatch(/\son\w+=/i) // sin manejadores inline
   })
 
+  it('la página deja elegir varias fotos de la galería y reintenta cuando el ordenador pide esperar', async () => {
+    const s = await start()
+    const r = await send(s.origin, s.base)
+    const galeria = /<input[^>]*id="galeria"[^>]*>/.exec(r.text)?.[0] ?? ''
+    expect(galeria).toContain('multiple')
+    expect(galeria).toContain('accept="image/*"')
+    expect(galeria).not.toContain('capture')
+    expect(r.text).toContain("get('Retry-After')")
+  })
+
   it('el nonce cambia en cada respuesta', async () => {
     const s = await start()
     const n = async () => /nonce-([^']+)'/.exec(String((await send(s.origin, s.base)).headers['content-security-policy']))?.[1]
@@ -384,6 +394,28 @@ describe('límites', () => {
     expect((await upload(s, FOTO)).status).toBe(200)
     expect((await upload(s, FOTO)).status).toBe(429)
     expect(s.spy).toHaveBeenCalledTimes(2)
+  })
+
+  it('un rechazo pasajero (cola de OCR llena) lleva Retry-After; el tope de la sesión no', async () => {
+    let full: string | null = 'Espera a que se procesen las fotos anteriores'
+    const s = await start({ maxUploads: 1, checkCapacity: () => full })
+    const busy = await upload(s, FOTO)
+    expect(busy.status).toBe(429)
+    expect(busy.headers['retry-after']).toBe('5')
+    full = null
+    expect((await upload(s, FOTO)).status).toBe(200)
+    const over = await upload(s, FOTO)
+    expect(over.status).toBe(429)
+    expect(over.headers['retry-after']).toBeUndefined()
+  })
+
+  it('UploadRejected 429 desde onImage también lleva Retry-After', async () => {
+    const s = await start({}, async () => {
+      throw new UploadRejected(429, 'Espera a que se procesen las fotos anteriores')
+    })
+    const r = await upload(s, FOTO)
+    expect(r.status).toBe(429)
+    expect(r.headers['retry-after']).toBe('5')
   })
 
   it('maxUploads por defecto: 20', async () => {

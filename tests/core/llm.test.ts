@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { OllamaProvider, extractJson } from '@core/llm'
+import { ModelUnavailableError, OllamaProvider, extractJson } from '@core/llm'
 
 type Call = { url: string; init?: RequestInit }
 
@@ -36,7 +36,9 @@ describe('OllamaProvider.generateJson', () => {
     expect(body.model).toBe('qwen2.5:7b')
     expect(body.stream).toBe(false)
     expect(body.format).toBe('json')
-    expect(body.options).toEqual({ temperature: 0.2 })
+    // Velocidad en CPU: el modelo sigue cargado entre peticiones y la respuesta tiene un tope.
+    expect(body.keep_alive).toBe('30m')
+    expect(body.options).toEqual({ temperature: 0.2, num_ctx: 4096, num_predict: 1024 })
     expect(body.messages).toEqual([
       { role: 'system', content: 'SYS' },
       { role: 'user', content: 'USR' }
@@ -116,6 +118,23 @@ describe('OllamaProvider.generateJson', () => {
     })
     const p = new OllamaProvider({ fetchImpl: impl })
     await expect(p.generateJson({ system: 's', user: 'u' })).rejects.toThrow(/No se pudo conectar con Ollama/)
+  })
+
+  it('ModelUnavailableError solo si no se llega al modelo: red caída o modelo no instalado (404)', async () => {
+    const err = async (handler: () => Response) => {
+      const { impl } = fakeFetch(handler)
+      return new OllamaProvider({ fetchImpl: impl }).generateJson({ system: 's', user: 'u' }).catch((e: unknown) => e)
+    }
+    expect(
+      await err(() => {
+        throw new TypeError('fetch failed')
+      })
+    ).toBeInstanceOf(ModelUnavailableError)
+    expect(await err(() => new Response('model not found', { status: 404 }))).toBeInstanceOf(ModelUnavailableError)
+    // El modelo existe y contestó (mal): no es "no disponible".
+    expect(await err(() => new Response('boom', { status: 500 }))).not.toBeInstanceOf(ModelUnavailableError)
+    expect(await err(() => jsonResponse({ message: { content: 'lo siento, no puedo' } }))).not.toBeInstanceOf(ModelUnavailableError)
+    expect(await err(() => jsonResponse({ message: {} }))).not.toBeInstanceOf(ModelUnavailableError)
   })
 
   it('lanza si la respuesta del modelo no contiene JSON', async () => {

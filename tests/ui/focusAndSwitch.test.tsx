@@ -5,16 +5,16 @@ import userEvent from '@testing-library/user-event'
 import App from '../../src/renderer/src/App'
 import Notes from '../../src/renderer/src/views/Notes'
 import { ChunkFocusProvider, useChunkFocus } from '../../src/renderer/src/chunkFocus'
-import { doc, installApi } from './fakeApi'
+import { doc, importResult, installApi } from './fakeApi'
 
 const subject = { id: 7, name: 'Biología' }
 const twoSubjects = vi.fn(async () => ({ ok: true as const, data: [{ id: 7, name: 'Biología' }, { id: 8, name: 'Química' }] }))
-const imageImport = vi.fn(async () => ({ ok: true as const, data: { canceled: false as const, kind: 'image' as const, documentId: 9, ocrText: 'Texto OCR' } }))
+const imageImport = importResult({ file: 'foto.png', ok: true, kind: 'image', documentId: 9, ocrText: 'Texto OCR' })
 const chunk = (id: number, text: string, documentId = 1) => ({ id, documentId, subjectId: 7, position: id, text })
 
 describe('I1: cambiar de asignatura con trabajo sin terminar', () => {
   it('con una revisión OCR abierta pide confirmación; cancelar mantiene asignatura y revisión', async () => {
-    installApi({ subjects: { list: twoSubjects }, notes: { import: imageImport } })
+    installApi({ subjects: { list: twoSubjects }, notes: { importMany: imageImport } })
     render(<App />)
     await userEvent.click(await screen.findByRole('button', { name: 'Biología' }))
     await userEvent.click(await screen.findByRole('button', { name: /Importar foto/ }))
@@ -34,7 +34,7 @@ describe('I1: cambiar de asignatura con trabajo sin terminar', () => {
   })
 
   it('con una importación en curso también pide confirmación', async () => {
-    installApi({ subjects: { list: twoSubjects }, notes: { import: vi.fn(() => new Promise(() => {})) as never } })
+    installApi({ subjects: { list: twoSubjects }, notes: { importMany: vi.fn(() => new Promise(() => {})) as never } })
     render(<App />)
     await userEvent.click(await screen.findByRole('button', { name: 'Biología' }))
     await userEvent.click(await screen.findByRole('button', { name: /Importar PDF/ }))
@@ -95,7 +95,7 @@ describe('I3: el foco no se pierde', () => {
   })
 
   it('tras confirmar la revisión OCR el foco va al encabezado Documentos', async () => {
-    installApi({ notes: { import: imageImport } })
+    installApi({ notes: { importMany: imageImport } })
     render(<Notes subject={subject} />)
     await userEvent.click(await screen.findByRole('button', { name: /Importar foto/ }))
     await userEvent.click(await screen.findByRole('button', { name: 'Confirmar y trocear' }))
@@ -103,7 +103,7 @@ describe('I3: el foco no se pierde', () => {
   })
 
   it('tras descartar la foto el foco va al encabezado Documentos', async () => {
-    installApi({ notes: { import: imageImport } })
+    installApi({ notes: { importMany: imageImport } })
     render(<Notes subject={subject} />)
     await userEvent.click(await screen.findByRole('button', { name: /Importar foto/ }))
     await userEvent.click(await screen.findByRole('button', { name: 'Descartar foto' }))

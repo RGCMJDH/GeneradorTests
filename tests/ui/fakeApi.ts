@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import type { Api, DocumentInfo } from '../../src/shared/api'
+import type { Api, DocumentInfo, ImportItem } from '../../src/shared/api'
 
 type Over = { [K in keyof Api]?: Partial<Api[K]> }
 
@@ -8,6 +8,9 @@ const ok = <T>(data: T) => Promise.resolve({ ok: true as const, data })
 export const MOBILE_URL = `http://192.168.1.40:5555/u/${'a'.repeat(32)}`
 /** PNG de 1x1: basta para que el <img> del QR tenga un data URL válido. */
 export const QR_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+
+/** notes.importMany que devuelve estos resultados por archivo. */
+export const importResult = (...items: ImportItem[]) => vi.fn(() => ok({ canceled: false as const, items }))
 
 /** `window.api` falso con todos los métodos como vi.fn; `over` sustituye métodos concretos. */
 export function installApi(over: Over = {}): Api {
@@ -19,6 +22,7 @@ export function installApi(over: Over = {}): Api {
     },
     notes: {
       import: vi.fn(() => ok({ canceled: true as const })),
+      importMany: vi.fn(() => ok({ canceled: true as const })),
       confirmOcr: vi.fn((documentId: number) => ok({ documentId, chunkCount: 1, deletedQuestions: 0 })),
       list: vi.fn(() => ok([])),
       chunks: vi.fn(() => ok([])),

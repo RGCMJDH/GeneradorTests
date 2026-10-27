@@ -253,7 +253,7 @@ describe('MobileUpload: fotos recibidas', () => {
     expect(await screen.findByLabelText(/Texto reconocido/)).toHaveValue('primera')
     b.image(photo(10, 'segunda'))
     expect(screen.getByLabelText(/Texto reconocido/)).toHaveValue('primera')
-    expect(screen.getByText(/1 foto más recibida del móvil esperando revisión/)).toBeInTheDocument()
+    expect(screen.getByText(/1 foto más esperando revisión/)).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Descartar foto' }))
     await userEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Descartar' }))
     expect(api.notes.deleteDocument).toHaveBeenCalledWith(7, 9)

@@ -4,13 +4,49 @@ Aplicación de escritorio para Windows que genera tests a partir de **tus propio
 
 Importas tus apuntes por asignatura, la app los trocea, y genera preguntas de verdadero/falso, test, desarrollo y ejercicios prácticos. Cada pregunta lleva una cita que el código ha comprobado contra tus apuntes. Si no aparece, la pregunta se descarta.
 
+> **Para usar la app, descarga el instalador `.exe`** desde [Releases](https://github.com/RGCMJDH/GeneradorTests/releases/latest). Ver [Descargar la app](#descargar-la-app).
+> Para ver o modificar el código, usa la rama `main`.
+>
 > Cómo usarla paso a paso: [docs/GUIA_DE_USO.md](docs/GUIA_DE_USO.md).
 > Cómo funciona por dentro: [docs/COMO_FUNCIONA.md](docs/COMO_FUNCIONA.md).
+
+## Descargar la app
+
+1. Entra en [Releases](https://github.com/RGCMJDH/GeneradorTests/releases/latest) y descarga uno de estos archivos:
+   - **`Generador-de-tests-Setup-<versión>.exe`**: instalador. Crea accesos directos en el escritorio y en el menú Inicio. Es la opción recomendada.
+   - **`Generador-de-tests-<versión>-portable.exe`**: se abre sin instalar. Tarda algo más en arrancar.
+2. Ábrelo. Como la app no está firmada, Windows puede mostrar «Windows protegió su PC»: pulsa **Más información → Ejecutar de todas formas**.
+3. Instala [Ollama](https://ollama.com) y el modelo (ver [Requisitos](#requisitos)). Sin Ollama la app abre y puedes importar apuntes, pero no generar tests.
+
+No hace falta instalar Node ni descargar el código.
+
+Los `.exe` los compila GitHub en una máquina Windows (`.github/workflows/release.yml`) cada vez que se publica una versión. Antes de publicarlos se pasan todos los tests y una prueba de la app ya empaquetada.
+
+## Qué rama descargar
+
+Solo hace falta si quieres el **código**. Para usar la app, mejor el `.exe` de [Descargar la app](#descargar-la-app).
+
+| Rama | Qué contiene | ¿Descargar? |
+|---|---|---|
+| **`main`** | La versión **1.0**: la app completa con todos los arreglos. | **Sí, esta.** |
+| `feat/generador-tests` | La rama donde se desarrolló la app. Le faltan los últimos arreglos de la verificación de citas y no está en 1.0. Todo lo que tiene ya está en `main`. | No. Se borrará. |
+| `claude/optimistic-sagan-mt1ezm` | Rama de trabajo de los arreglos finales, ya fusionada en `main`. | No. Se borrará. |
+
+Para descargarla:
+
+- **Sin Git:** en GitHub, elige la rama `main` en el selector de ramas y pulsa **Code → Download ZIP**.
+- **Con Git:**
+
+  ```
+  git clone -b main https://github.com/RGCMJDH/GeneradorTests.git
+  ```
+
+Después sigue los pasos de [Requisitos](#requisitos) e [Instalación y uso](#instalación-y-uso).
 
 ## Características
 
 - **Asignaturas** separadas: apuntes, preguntas e historial no se mezclan.
-- **Importación** de texto, Markdown, PDF con texto y fotos (OCR en español e inglés). El texto de una foto se revisa antes de guardarse.
+- **Importación** de texto, Markdown, PDF con texto y fotos (OCR en español e inglés), **varios archivos de golpe**. El texto de una foto se revisa antes de guardarse.
 - **Fotos desde el móvil**: un código QR abre un enlace temporal en tu wifi para subir fotos.
 - **Tests** de verdadero/falso, test y desarrollo, con corrección y feedback. **Ejercicios prácticos** a partir de apuntes con datos o ejemplos resueltos.
 - **Índice de conceptos** por asignatura, para elegir tema.
@@ -18,12 +54,12 @@ Importas tus apuntes por asignatura, la app los trocea, y genera preguntas de ve
 
 ## La promesa y sus límites
 
-Cada pregunta que ves lleva una **cita literal** de tus apuntes, y el código comprueba que esa cita aparece en el fragmento de origen. Si el modelo no consigue una cita válida tras tres intentos, la pregunta se descarta y el resumen te dice cuántas y por qué. Si tus apuntes no cubren un tema, la app lo dice en vez de inventar.
+Cada pregunta que ves lleva una **cita literal** de tus apuntes, y el código comprueba que esa cita aparece en el fragmento de origen, con los mismos números, signos y operadores. Si el modelo no consigue una cita válida tras tres intentos, la pregunta se descarta y el resumen te dice cuántas y por qué. Si tus apuntes no cubren un tema, la app lo dice en vez de inventar.
 
 Lo que **no** garantiza:
 
 - La comprobación prueba que el **pasaje existe** en tus apuntes, no que la pregunta esté bien planteada ni que el modelo lo haya entendido. Revisa las preguntas con criterio.
-- Se **ignoran los símbolos** al comparar: `x = -5` y `x = 5` pueden darse por iguales, y también `2,5` y `2.5`. Es una debilidad conocida, sobre todo en ejercicios con números.
+- En los **ejercicios prácticos** se comprueba además que cada número del enunciado y de la respuesta esté en tus apuntes. Esto no se aplica a verdadero/falso ni a test, donde una opción incorrecta puede cambiar una cifra a propósito.
 - La calidad depende del modelo. Con modelos pequeños se descartan más preguntas.
 
 ## Requisitos
@@ -36,17 +72,23 @@ Lo que **no** garantiza:
   ```
 
   Para usar otro modelo, define `GT_MODEL` (por ejemplo `GT_MODEL=llama3.1:8b`) o crea un `config.json` con `{"model": "..."}` en la carpeta de datos de la app.
-- Sin GPU, el modelo corre en CPU: generar un test puede tardar **minutos**.
+- Sin GPU, el modelo corre en CPU: generar un test puede tardar **minutos**. La primera pregunta tarda más porque se carga el modelo; luego se mantiene cargado 30 minutos.
+- ¿Demasiado lento? `qwen2.5:3b` va aproximadamente el doble de rápido que `qwen2.5:7b` en CPU, a cambio de más preguntas descartadas. Descárgalo (`ollama pull qwen2.5:3b`) y ponlo en `config.json` como `{"model": "qwen2.5:3b"}`. Un modelo más grande es más fiable pero más lento: en un PC sin tarjeta gráfica no hay uno que sea las dos cosas.
 - Para desarrollar: Node 24.
 
 ## Instalación y uso
+
+Si solo quieres usar la app, instala el `.exe` (ver [Descargar la app](#descargar-la-app)). Para trabajar con el código:
 
 ```
 npm install
 npm run dev     # aplicación en modo desarrollo
 npm test        # pruebas
 npm run pack    # empaquetado en release/win-unpacked/ (sin instalador)
+npm run dist    # instalador y portable .exe en release/ (en Windows)
 ```
+
+Para publicar una versión nueva, cambia `version` en `package.json` (por ejemplo a `1.0.1`) y fusiónalo en `main`. GitHub compila los `.exe` y, si esa versión aún no está publicada, crea la Release `v1.0.1` con ellos.
 
 Pasos para usarla:
 
@@ -61,6 +103,7 @@ Pasos para usarla:
 - El móvil debe estar en **la misma wifi** que el PC. Si no conecta, permite la app en el Firewall de Windows para redes privadas.
 - La conexión es **HTTP sin cifrar**. Úsala solo en redes de confianza.
 - La subida se desactiva sola a los **10 minutos** o al pulsar Detener.
+- Desde la galería del móvil puedes elegir **varias fotos de golpe** (hasta 20 por sesión).
 
 ## Datos
 

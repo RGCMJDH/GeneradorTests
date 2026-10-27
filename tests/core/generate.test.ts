@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { openStore } from '@core/store'
-import type { LlmProvider } from '@core/llm'
+import { ModelUnavailableError, type LlmProvider } from '@core/llm'
 import { generateQuestions } from '@core/generate'
 
 type Call = { system: string; user: string; n: number }
@@ -223,6 +223,52 @@ describe('generateQuestions', () => {
       expect(r2.reasons[0]).toContain('boom')
     })
 
+    it('{"sin_material":true} no se reintenta: una sola llamada para esa pregunta', async () => {
+      const { store, s, c1 } = await setup()
+      const llm = new FakeLlm([{ sin_material: true }, good(c1.id)])
+      const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'desarrollo', count: 1 })
+      expect(llm.calls).toBe(1)
+      expect(r.questions).toHaveLength(0)
+      expect(r.discarded).toBe(1)
+    })
+
+    it('un fragmento sin material no se vuelve a pedir en la misma generación', async () => {
+      const { store, s, c2 } = await setup()
+      const llm = new FakeLlm([
+        ({ user, n }: Call) => (user.includes(T1) ? { sin_material: true } : good(c2.id, { cita: Q2, enunciado: `Pregunta ${'x'.repeat(n)}` }))
+      ])
+      const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'desarrollo', count: 3 })
+      expect(llm.prompts.filter((p) => p.user.includes(T1))).toHaveLength(1)
+      expect(r.questions).toHaveLength(2)
+      expect(r.discarded).toBe(1)
+    })
+
+    it('si ningún fragmento tiene material se para sin más llamadas y cuenta el resto como descartado', async () => {
+      const { store, s } = await setup()
+      const llm = new FakeLlm([{ sin_material: true }])
+      const progress: number[] = []
+      const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'desarrollo', count: 5 }, (d) => progress.push(d))
+      expect(llm.calls).toBe(2) // un intento por cada uno de los 2 fragmentos
+      expect(r.questions).toHaveLength(0)
+      expect(r.discarded).toBe(5)
+      expect(r.insufficient).toBe(true)
+      expect(r.reasons.every((x) => /sin material/i.test(x))).toBe(true)
+      expect(progress.at(-1)).toBe(5)
+    })
+
+    it('el prompt solo lista las preguntas previas del mismo fragmento', async () => {
+      const { store, s, c1, c2 } = await setup()
+      const llm = new FakeLlm([
+        ({ user, n }: Call) =>
+          user.includes(T1) ? good(c1.id, { enunciado: `Sobre la mitocondria ${n}` }) : good(c2.id, { cita: Q2, enunciado: `Sobre el núcleo ${n}` })
+      ])
+      await generateQuestions({ llm, store }, { subjectId: s.id, type: 'desarrollo', count: 3 })
+      const third = llm.prompts[2].user // vuelve al fragmento 1
+      expect(third).toContain(T1)
+      expect(third).toContain('Sobre la mitocondria 1')
+      expect(third).not.toContain('Sobre el núcleo 2')
+    })
+
     it('{"sin_material":true} es descarte con razón "sin material"', async () => {
       const { store, s } = await setup()
       const llm = new FakeLlm([{ sin_material: true }])
@@ -298,6 +344,22 @@ describe('generateQuestions', () => {
   })
 
   describe('endurecimiento', () => {
+    it('saveQuestion que lanza en la 1ª pregunta: no es "sin material" ni "modelo no disponible"', async () => {
+      const { store, s, c1 } = await setup()
+      const broken = {
+        ...store,
+        saveQuestion() {
+          throw new Error('SQLITE_FULL: disco lleno')
+        }
+      }
+      const llm = new FakeLlm([good(c1.id)])
+      const r = await generateQuestions({ llm, store: broken }, { subjectId: s.id, type: 'desarrollo', count: 2 })
+      expect(r.questions).toHaveLength(0)
+      expect(r.insufficient).toBe(false)
+      expect(r.modelUnavailable).toBe(false)
+      expect(r.reasons[0]).toMatch(/no se pudo guardar la pregunta: SQLITE_FULL/)
+    })
+
     it('saveQuestion que lanza en la 2ª pregunta: devuelve la 1ª, cuenta el resto como descartadas, no lanza', async () => {
       const { store, s, c1, c2 } = await setup()
       let saves = 0
@@ -338,7 +400,7 @@ describe('generateQuestions', () => {
 
     it('count > 50 se limita a 50', async () => {
       const { store, s } = await setup()
-      const llm = new FakeLlm([{ sin_material: true }])
+      const llm = new FakeLlm([{}]) // forma inválida: se reintenta, así cada pregunta cuesta sus 3 intentos
       const totals = new Set<number>()
       const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'desarrollo', count: 500 }, (_d, t) => totals.add(t))
       expect([...totals]).toEqual([50])
@@ -434,11 +496,9 @@ describe('generateQuestions', () => {
   describe('progreso y cancelación', () => {
     it('onProgress se llama una vez por pregunta (válida o no)', async () => {
       const { store, s, c1 } = await setup()
-      // pregunta 1 válida; pregunta 2 agota sus 3 intentos con sin_material; pregunta 3 válida
+      // pregunta 1 válida; pregunta 2 sin material (sin reintentos); pregunta 3 válida
       const llm = new FakeLlm([
         good(c1.id),
-        { sin_material: true },
-        { sin_material: true },
         { sin_material: true },
         ({ user }: Call) => (user.includes(T1) ? good(c1.id, { enunciado: '¿Qué es el ATP?' }) : good(c1.id + 1, { cita: Q2, enunciado: '¿Dónde está el ADN?' }))
       ])
@@ -560,8 +620,8 @@ describe('generateQuestions: practico', () => {
     const llm = new FakeLlm([
       (c: Call) =>
         c.user.includes(EX1)
-          ? exercise(chunks[1].id, { enunciado: `Tensión ${c.n}` })
-          : exercise(chunks[3].id, { enunciado: `Área ${c.n}`, cita: EX2_QUOTE, respuesta: 'pi por el radio al cuadrado' })
+          ? exercise(chunks[1].id, { enunciado: `Tensión ${'x'.repeat(c.n)}` })
+          : exercise(chunks[3].id, { enunciado: `Área ${'x'.repeat(c.n)}`, cita: EX2_QUOTE, respuesta: 'pi por el radio al cuadrado' })
     ])
     const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'practico', count: 4 })
     expect(r.questions).toHaveLength(4)
@@ -586,9 +646,10 @@ describe('generateQuestions: practico', () => {
     ['"calcula"', 'Se calcula la media sumando todos los valores.']
   ])('un chunk con %s es candidato', async (_n, text) => {
     const { store, s, chunks } = await make([text])
-    const llm = new FakeLlm([exercise(chunks[0].id, { cita: text.slice(0, 20) })])
+    const llm = new FakeLlm([exercise(chunks[0].id, { cita: text })])
     await generateQuestions({ llm, store }, { subjectId: s.id, type: 'practico', count: 1 })
-    expect(llm.calls).toBe(1)
+    expect(llm.calls).toBeGreaterThan(0)
+    expect(llm.prompts[0].user).toContain(text)
   })
 
   it('el prompt exige que los datos y el método aparezcan en el fragmento, y una cita literal que los contenga', async () => {
@@ -661,5 +722,95 @@ describe('generateQuestions: practico', () => {
     const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'desarrollo', count: 1 })
     expect(llm.calls).toBe(1)
     expect(r.questions).toHaveLength(1)
+  })
+})
+
+describe('generateQuestions: números del práctico', () => {
+  const EX = 'Ejemplo resuelto: una resistencia de 10 ohmios recorrida por 2 amperios cumple V = I · R, es decir V = 2 · 10 = 20 voltios.'
+  const EX_QUOTE = 'V = I · R, es decir V = 2 · 10 = 20 voltios'
+  const exercise = (chunkId: number, extra: Record<string, unknown> = {}) => ({
+    enunciado: 'Una resistencia de 10 ohmios recorrida por 2 amperios: ¿qué tensión hay en sus extremos?',
+    respuesta: 'V = I · R = 2 · 10 = 20 voltios',
+    explicacion: 'Se aplica la ley de Ohm del fragmento.',
+    chunkId,
+    cita: EX_QUOTE,
+    ...extra
+  })
+
+  async function make(text: string) {
+    const store = await openStore()
+    const s = store.createSubject('Física')
+    const d = store.addDocument({ subjectId: s.id, title: 'tema', sourceType: 'text' })
+    const [c] = store.addChunks(d.id, s.id, [text])
+    return { store, s, c }
+  }
+
+  it.each([
+    ['resultado inventado en la respuesta', { respuesta: 'V = I · R = 2 · 10 = 30 voltios' }],
+    ['dato inventado en el enunciado', { enunciado: 'Una resistencia de 15 ohmios recorrida por 2 amperios: ¿qué tensión hay?' }],
+    ['separador decimal cambiado', { respuesta: 'V = 2.0 · 10 = 20 voltios' }]
+  ])('descarta un práctico con %s aunque la cita sea válida', async (_n, extra) => {
+    const { store, s, c } = await make(EX)
+    const llm = new FakeLlm([exercise(c.id, extra)])
+    const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'practico', count: 1 })
+    expect(r.questions).toHaveLength(0)
+    expect(r.discarded).toBe(1)
+    expect(r.reasons[0]).toMatch(/número/)
+    expect(store.listQuestions(s.id)).toHaveLength(0)
+  })
+
+  it('la explicación no se comprueba: pasos numerados y resultados intermedios no descartan el ejercicio', async () => {
+    const { store, s, c } = await make(EX)
+    const llm = new FakeLlm([exercise(c.id, { explicacion: 'Paso 1: se toma I = 2. Paso 2: se multiplica por R; 2 · 10 da 20.' })])
+    const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'practico', count: 1 })
+    expect(r.questions).toHaveLength(1)
+  })
+
+  it('vf no exige números del fragmento: una afirmación falsa puede cambiar una cifra', async () => {
+    const { store, s, c } = await make(EX)
+    const llm = new FakeLlm([
+      { enunciado: 'La tensión del ejemplo es de 30 voltios.', respuesta: 'falso', explicacion: 'Son 20 voltios.', chunkId: c.id, cita: EX_QUOTE }
+    ])
+    const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'vf', count: 1 })
+    expect(r.questions).toHaveLength(1)
+  })
+})
+
+describe('generateQuestions: modelo no disponible', () => {
+  it('si todas las llamadas fallan por el modelo → modelUnavailable, no "sin material"', async () => {
+    const { store, s } = await setup()
+    const llm = new FakeLlm([new ModelUnavailableError('No se pudo conectar con Ollama en http://localhost:11434')])
+    const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'vf', count: 2 })
+    expect(r.questions).toHaveLength(0)
+    expect(r.modelUnavailable).toBe(true)
+    expect(r.insufficient).toBe(false)
+    expect(r.reasons.every((x) => x.startsWith('error del modelo'))).toBe(true)
+  })
+
+  it('un modelo que contesta pero sin JSON válido no es modelUnavailable: es material/modelo insuficiente', async () => {
+    const { store, s } = await setup()
+    const llm = new FakeLlm([new Error('La respuesta del modelo no contiene JSON válido.')])
+    const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'vf', count: 1 })
+    expect(r.questions).toHaveLength(0)
+    expect(r.modelUnavailable).toBe(false)
+    expect(r.insufficient).toBe(true)
+  })
+
+  it('si el modelo responde aunque sea una vez, no es modelUnavailable', async () => {
+    const { store, s } = await setup()
+    const llm = new FakeLlm([new ModelUnavailableError('timeout'), { sin_material: true }])
+    const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'vf', count: 1 })
+    expect(r.questions).toHaveLength(0)
+    expect(r.modelUnavailable).toBe(false)
+    expect(r.insufficient).toBe(true)
+  })
+
+  it('con preguntas generadas, modelUnavailable es false aunque otras fallen por el modelo', async () => {
+    const { store, s, c1 } = await setup()
+    const llm = new FakeLlm([good(c1.id), new ModelUnavailableError('se cayó')])
+    const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'desarrollo', count: 2 })
+    expect(r.questions).toHaveLength(1)
+    expect(r.modelUnavailable).toBe(false)
+    expect(r.insufficient).toBe(false)
   })
 })

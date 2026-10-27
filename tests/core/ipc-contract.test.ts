@@ -160,6 +160,9 @@ describe('validación en la frontera IPC', () => {
     ['notes:import', 'kind desconocido', [1, 'exe']],
     ['notes:import', 'ruta en lugar de kind', [1, 'C:\\secreto.txt']],
     ['notes:import', 'ruta como tercer argumento', [1, 'text', 'C:\\secreto.txt']],
+    ['notes:importMany', 'subjectId negativo', [-1, 'text']],
+    ['notes:importMany', 'kind desconocido', [1, 'exe']],
+    ['notes:importMany', 'ruta como tercer argumento', [1, 'text', 'C:\\secreto.txt']],
     ['notes:confirmOcr', 'documentId 0', [0, 'texto']],
     ['notes:confirmOcr', 'texto de más de 2 MB', [1, longText]],
     ['notes:confirmOcr', 'texto no string', [1, null]],
@@ -300,6 +303,92 @@ describe('notes:import', () => {
   })
 })
 
+describe('notes:importMany', () => {
+  type Item = { file: string; ok: boolean; kind?: string; document?: { id: number; chunkCount: number }; documentId?: number; ocrText?: string; error?: string; code?: string }
+  type Many = { canceled: false; items: Item[] }
+
+  it('abre el diálogo con selección múltiple y devuelve canceled si se cancela', async () => {
+    const s = await setup({ core: explodingCore })
+    const subj = s.store.createSubject('A')
+    for (const [kind, ext] of [['text', 'md'], ['pdf', 'pdf'], ['image', 'png']] as const) {
+      expect(await s.call('notes:importMany', subj.id, kind)).toEqual({ ok: true, data: { canceled: true } })
+      const opts = s.dialog.calls.at(-1)!
+      expect(opts.properties).toEqual(['openFile', 'multiSelections'])
+      expect(opts.filters!.flatMap((f) => f.extensions)).toContain(ext)
+    }
+  })
+
+  it('importa todos los archivos elegidos, en orden, con un resultado por archivo y solo el nombre (no la ruta)', async () => {
+    const s = await setup()
+    const subj = s.store.createSubject('A')
+    const md = join(ROOT, 'tests/fixtures/apuntes-ejemplo.md')
+    s.dialog.next = { canceled: false, filePaths: [md, md] }
+    const r = await s.call<Many>('notes:importMany', subj.id, 'text')
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.items).toHaveLength(2)
+    for (const it of r.data.items) {
+      expect(it).toMatchObject({ file: 'apuntes-ejemplo.md', ok: true, kind: 'text' })
+      expect(it.document!.chunkCount).toBeGreaterThan(0)
+    }
+    expect(s.store.listDocuments(subj.id)).toHaveLength(2)
+    expect(JSON.stringify(r)).not.toContain('tests/fixtures')
+  })
+
+  it('un archivo que falla no detiene los demás: su resultado lleva el error y el código', async () => {
+    const importPdf = vi.fn(async (deps: { store: Store }, subjectId: number, path: string) => {
+      if (path.endsWith('escaneo.pdf')) throw new NoTextError()
+      if (path.endsWith('roto.pdf')) throw new Error('PDF dañado')
+      return { document: deps.store.addDocument({ subjectId, title: path, sourceType: 'pdf', path }), chunks: [] }
+    })
+    const s = await setup({ core: { importPdf: importPdf as unknown as CoreFns['importPdf'] } })
+    const subj = s.store.createSubject('A')
+    s.dialog.next = { canceled: false, filePaths: ['C:\\apuntes\\a.pdf', 'C:\\apuntes\\escaneo.pdf', '/home/x/roto.pdf', 'C:\\apuntes\\b.pdf'] }
+    const r = await s.call<Many>('notes:importMany', subj.id, 'pdf')
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.items.map((i) => [i.file, i.ok, i.code])).toEqual([
+      ['a.pdf', true, undefined],
+      ['escaneo.pdf', false, 'NO_TEXT'],
+      ['roto.pdf', false, 'INTERNAL'],
+      ['b.pdf', true, undefined]
+    ])
+    expect(r.data.items[2].error).toBe('PDF dañado')
+    expect(importPdf).toHaveBeenCalledTimes(4)
+  })
+
+  it('fotos: cada una devuelve su texto OCR para revisarlo, sin trocear', async () => {
+    const importImage = vi.fn(async (deps: { store: Store }, subjectId: number, path: string) => ({
+      document: deps.store.addDocument({ subjectId, title: path, sourceType: 'image', path }),
+      ocrText: `texto de ${path.slice(-5)}`
+    }))
+    const s = await setup({ core: { importImage: importImage as unknown as CoreFns['importImage'] } })
+    const subj = s.store.createSubject('A')
+    s.dialog.next = { canceled: false, filePaths: ['C:\\f\\1.png', 'C:\\f\\2.png'] }
+    const r = await s.call<Many>('notes:importMany', subj.id, 'image')
+    expect(r.ok && r.data.items.map((i) => [i.kind, i.ocrText])).toEqual([
+      ['image', 'texto de 1.png'],
+      ['image', 'texto de 2.png']
+    ])
+    expect(r.ok && r.data.items.every((i) => typeof i.documentId === 'number')).toBe(true)
+  })
+
+  it('más de 50 archivos de golpe: INVALID sin importar ninguno', async () => {
+    const s = await setup({ core: explodingCore })
+    const subj = s.store.createSubject('A')
+    s.dialog.next = { canceled: false, filePaths: Array.from({ length: 51 }, (_, i) => `C:\\a\\${i}.md`) }
+    const r = fail(await s.call('notes:importMany', subj.id, 'text'))
+    expect(r.code).toBe('INVALID')
+    expect(r.error).toMatch(/50/)
+  })
+
+  it('asignatura inexistente: NOT_FOUND antes de abrir el diálogo', async () => {
+    const s = await setup({ core: explodingCore })
+    expect(fail(await s.call('notes:importMany', 999, 'text')).code).toBe('NOT_FOUND')
+    expect(s.dialog.calls).toEqual([])
+  })
+})
+
 // ------------------------------------------------- (iv) confirmOcr y borrado
 
 describe('notes:confirmOcr', () => {
@@ -385,6 +474,13 @@ describe('apuntes: lectura con ámbito de asignatura', () => {
 // --------------------------------------------------------------- generación
 
 describe('quiz:generate / quiz:cancel', () => {
+  it('propaga modelUnavailable del core', async () => {
+    const generateQuestions = vi.fn(async () => ({ questions: [], discarded: 2, reasons: ['error del modelo: x'], insufficient: false, modelUnavailable: true }))
+    const s = await setup({ core: { generateQuestions: generateQuestions as unknown as CoreFns['generateQuestions'] } })
+    const r = await s.call('quiz:generate', { requestId: 'req-mu', subjectId: 1, type: 'vf', count: 2 })
+    expect(r).toMatchObject({ ok: true, data: { insufficient: false, modelUnavailable: true } })
+  })
+
   it('emite progreso al emisor con el requestId y devuelve el resultado del core', async () => {
     const generateQuestions = vi.fn(async (_d, _req, onProgress?: (d: number, t: number) => void) => {
       onProgress?.(1, 2)
@@ -546,7 +642,7 @@ describe('manejo de excepciones', () => {
     })
     const s = await setup({ store: throwing, ctx: { llm: llm({ health: async () => { throw new Error('x') } }) } })
     const valid: Record<string, unknown[]> = {
-      'subjects:list': [], 'subjects:create': ['A'], 'notes:import': [1, 'text'], 'notes:confirmOcr': [1, 'x'],
+      'subjects:list': [], 'subjects:create': ['A'], 'notes:import': [1, 'text'], 'notes:importMany': [1, 'text'], 'notes:confirmOcr': [1, 'x'],
       'notes:list': [1], 'notes:chunks': [1], 'notes:chunk': [1, 1], 'notes:deleteDocument': [1, 1],
       'quiz:generate': [{ requestId: 'r', subjectId: 1, type: 'vf', count: 1 }], 'quiz:cancel': ['r'],
       'quiz:startAttempt': [1], 'quiz:finishAttempt': [1, 1],

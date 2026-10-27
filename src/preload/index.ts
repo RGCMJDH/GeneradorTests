@@ -9,6 +9,7 @@ const api: Api = {
   },
   notes: {
     import: (subjectId, kind) => ipcRenderer.invoke(channels.notesImport, subjectId, kind),
+    importMany: (subjectId, kind) => ipcRenderer.invoke(channels.notesImportMany, subjectId, kind),
     confirmOcr: (documentId, correctedText, force) =>
       ipcRenderer.invoke(channels.notesConfirmOcr, documentId, correctedText, force),
     list: (subjectId) => ipcRenderer.invoke(channels.notesList, subjectId),
