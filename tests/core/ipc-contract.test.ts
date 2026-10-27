@@ -385,6 +385,13 @@ describe('apuntes: lectura con ámbito de asignatura', () => {
 // --------------------------------------------------------------- generación
 
 describe('quiz:generate / quiz:cancel', () => {
+  it('propaga modelUnavailable del core', async () => {
+    const generateQuestions = vi.fn(async () => ({ questions: [], discarded: 2, reasons: ['error del modelo: x'], insufficient: false, modelUnavailable: true }))
+    const s = await setup({ core: { generateQuestions: generateQuestions as unknown as CoreFns['generateQuestions'] } })
+    const r = await s.call('quiz:generate', { requestId: 'req-mu', subjectId: 1, type: 'vf', count: 2 })
+    expect(r).toMatchObject({ ok: true, data: { insufficient: false, modelUnavailable: true } })
+  })
+
   it('emite progreso al emisor con el requestId y devuelve el resultado del core', async () => {
     const generateQuestions = vi.fn(async (_d, _req, onProgress?: (d: number, t: number) => void) => {
       onProgress?.(1, 2)

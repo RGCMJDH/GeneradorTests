@@ -44,7 +44,7 @@ export function registerQuiz(ctx: IpcContext, r: Registrar): void {
       const onProgress = (done: number, total: number): void =>
         trySend(event, events.quizProgress, { requestId: reqId, done, total } satisfies ProgressEvent)
       const res = await ctx.core.generateQuestions({ llm: ctx.llm, store }, req, onProgress, controller.signal)
-      return { questions: res.questions, discarded: res.discarded, reasons: res.reasons, insufficient: res.insufficient }
+      return { questions: res.questions, discarded: res.discarded, reasons: res.reasons, insufficient: res.insufficient, modelUnavailable: res.modelUnavailable }
     } finally {
       running.delete(reqId)
     }

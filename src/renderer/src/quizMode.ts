@@ -1,6 +1,10 @@
 /** Modo de la pantalla de cuestionario: preguntas de test o ejercicios prácticos. Misma mecánica, distinto vocabulario. */
 export type QuizMode = 'test' | 'exercises'
 
+/** Igual en test y ejercicios: el problema es el modelo, no los apuntes. */
+export const MODEL_UNAVAILABLE =
+  'No se pudo contactar con el modelo de IA, así que no se ha generado nada. Comprueba que Ollama esté en marcha y tenga el modelo descargado (aviso «Ollama no disponible») y vuelve a intentarlo.'
+
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
 
 export interface ModeText {

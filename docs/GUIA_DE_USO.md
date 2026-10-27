@@ -86,7 +86,7 @@ Pestaña **Test**.
 
 Mientras se genera verás una barra de progreso. Puedes pulsar **Cancelar** en cualquier momento: las preguntas ya generadas se conservan.
 
-Al terminar, el resumen te dice cuántas preguntas se han generado y, si alguna se descartó, cuántas y por qué. Si tus apuntes no cubren el tema, verás «No hay material suficiente en tus apuntes para ese tema». En ese caso importa más apuntes o cambia el tema.
+Al terminar, el resumen te dice cuántas preguntas se han generado y, si alguna se descartó, cuántas y por qué. Si tus apuntes no cubren el tema, verás «No hay material suficiente en tus apuntes para ese tema». En ese caso importa más apuntes o cambia el tema. Si en cambio ves «No se pudo contactar con el modelo de IA», el problema no son tus apuntes: Ollama no está en marcha o le falta el modelo.
 
 ### Responder
 
@@ -97,7 +97,7 @@ Cada pregunta aparece sola, con su número («Pregunta 3 de 5»).
 
 Al responder aparece la corrección: correcto o incorrecto, la explicación y el **fragmento de origen**. La insignia **Cita verificada en tus apuntes** aparece solo cuando la cita se ha comprobado en tus apuntes. El botón **Ver en apuntes** te lleva al fragmento original.
 
-Si una corrección de desarrollo dice «(cita del modelo no verificada)», la explicación del modelo no tiene respaldo en tus apuntes. Revísala con cuidado.
+Si una corrección de desarrollo dice «(cita del modelo no verificada)», la explicación del modelo no tiene respaldo en tus apuntes. Revísala con cuidado. En los ejercicios, la marca «(cifras del modelo no verificadas…)» avisa de que el feedback usa números que no están en tus apuntes, en la pregunta ni en tu respuesta.
 
 ### Terminar
 
@@ -120,7 +120,7 @@ Pestaña **Historial**. Cada intento aparece con su fecha, su puntuación y su n
 
 ## Qué hacer si algo falla
 
-- **«Ollama no está disponible»**: comprueba que Ollama está abierto y que el modelo está descargado (`ollama list`). Luego pulsa **Reintentar**.
+- **«Ollama no está disponible»** o **«No se pudo contactar con el modelo de IA»**: comprueba que Ollama está abierto y que el modelo está descargado (`ollama list`). Luego pulsa **Reintentar**.
 - **La generación tarda mucho**: es normal en CPU. Usa menos preguntas, o cancela y prueba con un tema más concreto.
 - **Muchas preguntas descartadas**: el modelo no encontró citas válidas en el fragmento. Prueba con un tema más concreto o con apuntes mejor escritos.
 - **Una foto sale mal reconocida**: corrige el texto en la revisión antes de confirmar. Para mejorar el resultado, haz la foto con más luz y más cerca.

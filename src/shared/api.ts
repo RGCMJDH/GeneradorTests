@@ -102,6 +102,8 @@ export interface GenerateOutcome {
   discarded: number
   reasons: string[]
   insufficient: boolean
+  /** El modelo no respondió nunca (Ollama apagado o sin el modelo): no es falta de material. Ausente = false. */
+  modelUnavailable?: boolean
 }
 
 export interface ProgressEvent {

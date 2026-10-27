@@ -3,7 +3,7 @@ import type { Question } from './types'
 import type { LlmProvider } from './llm'
 import type { Store } from './store'
 import { normalize } from './normalize'
-import { verifyQuote } from './verify'
+import { numbersGrounded, verifyQuote } from './verify'
 
 export interface GradeResult {
   correct: boolean
@@ -15,6 +15,7 @@ export interface GradeResult {
 
 const MAX_ANSWER_CHARS = 4000
 const UNVERIFIED_MARK = ' (cita del modelo no verificada)'
+const UNGROUNDED_NUMBERS_MARK = ' (cifras del modelo no verificadas: no están en tus apuntes, en la pregunta ni en tu respuesta)'
 
 const SYSTEM_PROMPT = [
   'Eres un corrector de preguntas de estudio. Respondes siempre en español.',
@@ -111,9 +112,14 @@ export async function gradeAnswer(
   const verdict = parseVerdict(raw)
   if (!verdict) return unavailable('la respuesta del modelo no tiene el formato esperado')
 
+  // En un práctico, un resultado que el modelo se invente en el feedback no queda cubierto por la cita:
+  // sus números deben salir del fragmento, de la pregunta guardada (enunciado y referencia) o del alumno.
+  const numbersOk =
+    q.type !== 'practico' || numbersGrounded(verdict.feedback, [g.text, q.prompt, q.answer, answer].join('\n'))
+  const feedback = numbersOk ? verdict.feedback : verdict.feedback + UNGROUNDED_NUMBERS_MARK
   // La cita del modelo solo se muestra si aparece literalmente en el fragmento guardado.
   if (verifyQuote(verdict.cita, g.text)) {
-    return { correct: verdict.correcta, feedback: verdict.feedback, quote: verdict.cita, verified: true }
+    return { correct: verdict.correcta, feedback, quote: verdict.cita, verified: true }
   }
-  return result(verdict.correcta, verdict.feedback + UNVERIFIED_MARK)
+  return result(verdict.correcta, feedback + UNVERIFIED_MARK)
 }

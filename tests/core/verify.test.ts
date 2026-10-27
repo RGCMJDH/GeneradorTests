@@ -82,7 +82,35 @@ describe('verifyQuote: signos, cifras y límites de palabra', () => {
   })
 })
 
+describe('verifyQuote: superíndices y fracciones', () => {
+  it('rechaza 32 frente a 3²', () => {
+    expect(verifyQuote('x = 32 metros', 'el área es x = 3² metros')).toBe(false)
+  })
+
+  it('acepta 3^2 frente a 3²', () => {
+    expect(verifyQuote('x = 3^2 metros', 'el área es x = 3² metros')).toBe(true)
+  })
+
+  it('rechaza la resta 10 - 3 frente a 10⁻³', () => {
+    expect(verifyQuote('vale 10 - 3 gramos', 'la masa vale 10⁻³ gramos')).toBe(false)
+  })
+
+  it('acepta 10^-3 frente a 10⁻³', () => {
+    expect(verifyQuote('vale 10^-3 gramos', 'la masa vale 10⁻³ gramos')).toBe(true)
+  })
+
+  it('acepta 1/2 frente a ½ y rechaza 12', () => {
+    expect(verifyQuote('toma 1/2 litro', 'se toma ½ litro')).toBe(true)
+    expect(verifyQuote('toma 12 litro', 'se toma ½ litro')).toBe(false)
+  })
+})
+
 describe('numbersGrounded', () => {
+  it('3² aporta 3 y 2, no 32', () => {
+    expect(numbersGrounded('32', 'A = 3² = 9')).toBe(false)
+    expect(numbersGrounded('3^2 = 9', 'A = 3² = 9')).toBe(true)
+  })
+
   const chunkText = 'Una resistencia de 10 ohmios con 2,5 amperios da V = 25 voltios.'
 
   it('acepta texto sin números o con números del fragmento', () => {
