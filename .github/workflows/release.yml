@@ -1,11 +1,14 @@
 # Compila la app para Windows (instalador + portable) en una máquina Windows de GitHub.
 # - Al subir una etiqueta vX.Y.Z: publica los .exe en una Release con ese nombre.
-# - Lanzado a mano (Actions → Release Windows → Run workflow): deja los .exe como artefacto del run.
+# - En un PR hacia main, o lanzado a mano (Actions → Release Windows → Run workflow): solo compila y prueba,
+#   y deja los .exe como artefacto del run. No publica nada.
 name: Release Windows
 
 on:
   push:
     tags: ['v*']
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
