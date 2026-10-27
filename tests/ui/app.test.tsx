@@ -57,6 +57,6 @@ describe('App', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Ollama no responde')
     await userEvent.click(screen.getByRole('button', { name: 'Biología' }))
     await userEvent.click(await screen.findByRole('button', { name: /Importar texto/ }))
-    expect(api.notes.import).toHaveBeenCalledWith(7, 'text')
+    expect(api.notes.importMany).toHaveBeenCalledWith(7, 'text')
   })
 })

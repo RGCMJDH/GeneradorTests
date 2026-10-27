@@ -46,7 +46,7 @@ Después sigue los pasos de [Requisitos](#requisitos) e [Instalación y uso](#in
 ## Características
 
 - **Asignaturas** separadas: apuntes, preguntas e historial no se mezclan.
-- **Importación** de texto, Markdown, PDF con texto y fotos (OCR en español e inglés). El texto de una foto se revisa antes de guardarse.
+- **Importación** de texto, Markdown, PDF con texto y fotos (OCR en español e inglés), **varios archivos de golpe**. El texto de una foto se revisa antes de guardarse.
 - **Fotos desde el móvil**: un código QR abre un enlace temporal en tu wifi para subir fotos.
 - **Tests** de verdadero/falso, test y desarrollo, con corrección y feedback. **Ejercicios prácticos** a partir de apuntes con datos o ejemplos resueltos.
 - **Índice de conceptos** por asignatura, para elegir tema.
@@ -72,7 +72,8 @@ Lo que **no** garantiza:
   ```
 
   Para usar otro modelo, define `GT_MODEL` (por ejemplo `GT_MODEL=llama3.1:8b`) o crea un `config.json` con `{"model": "..."}` en la carpeta de datos de la app.
-- Sin GPU, el modelo corre en CPU: generar un test puede tardar **minutos**.
+- Sin GPU, el modelo corre en CPU: generar un test puede tardar **minutos**. La primera pregunta tarda más porque se carga el modelo; luego se mantiene cargado 30 minutos.
+- ¿Demasiado lento? `qwen2.5:3b` va aproximadamente el doble de rápido que `qwen2.5:7b` en CPU, a cambio de más preguntas descartadas. Descárgalo (`ollama pull qwen2.5:3b`) y ponlo en `config.json` como `{"model": "qwen2.5:3b"}`. Un modelo más grande es más fiable pero más lento: en un PC sin tarjeta gráfica no hay uno que sea las dos cosas.
 - Para desarrollar: Node 24.
 
 ## Instalación y uso
@@ -102,6 +103,7 @@ Pasos para usarla:
 - El móvil debe estar en **la misma wifi** que el PC. Si no conecta, permite la app en el Firewall de Windows para redes privadas.
 - La conexión es **HTTP sin cifrar**. Úsala solo en redes de confianza.
 - La subida se desactiva sola a los **10 minutos** o al pulsar Detener.
+- Desde la galería del móvil puedes elegir **varias fotos de golpe** (hasta 20 por sesión).
 
 ## Datos
 

@@ -9,6 +9,7 @@ export const channels = {
   subjectsList: 'subjects:list',
   subjectsCreate: 'subjects:create',
   notesImport: 'notes:import',
+  notesImportMany: 'notes:importMany',
   notesConfirmOcr: 'notes:confirmOcr',
   notesList: 'notes:list',
   notesChunks: 'notes:chunks',
@@ -71,6 +72,17 @@ export type ImportOutcome =
   | { canceled: true }
   | { canceled: false; kind: 'text' | 'pdf'; document: DocumentInfo; warning?: string }
   | { canceled: false; kind: 'image'; documentId: number; ocrText: string }
+
+/** Resultado de un archivo dentro de una importación múltiple. `file` es solo el nombre, nunca la ruta. */
+export type ImportItem =
+  | { file: string; ok: true; kind: 'text' | 'pdf'; document: DocumentInfo; warning?: string }
+  | { file: string; ok: true; kind: 'image'; documentId: number; ocrText: string }
+  | { file: string; ok: false; error: string; code: ErrorCode }
+
+export type ImportManyOutcome = { canceled: true } | { canceled: false; items: ImportItem[] }
+
+/** Máximo de archivos por importación múltiple (cada foto pasa por OCR, que tarda). */
+export const MAX_IMPORT_FILES = 50
 
 export interface ConfirmOcrOutcome {
   documentId: number
@@ -203,6 +215,8 @@ export interface Api {
   notes: {
     /** Abre el diálogo nativo en main; el renderer nunca pasa rutas. */
     import(subjectId: number, kind: ImportKind): Promise<Result<ImportOutcome>>
+    /** Igual, pero el diálogo deja elegir varios archivos; uno que falla no detiene los demás. */
+    importMany(subjectId: number, kind: ImportKind): Promise<Result<ImportManyOutcome>>
     confirmOcr(documentId: number, correctedText: string, force?: boolean): Promise<Result<ConfirmOcrOutcome>>
     list(subjectId: number): Promise<Result<DocumentInfo[]>>
     chunks(subjectId: number, documentId?: number): Promise<Result<Chunk[]>>

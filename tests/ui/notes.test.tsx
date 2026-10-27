@@ -4,7 +4,7 @@ import { render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import Notes from '../../src/renderer/src/views/Notes'
 import { ChunkFocusProvider, useChunkFocus } from '../../src/renderer/src/chunkFocus'
-import { doc, installApi } from './fakeApi'
+import { doc, importResult, installApi } from './fakeApi'
 
 const subject = { id: 7, name: 'Biología' }
 const okDocs = (docs = [doc()]) => vi.fn(async () => ({ ok: true as const, data: docs }))
@@ -33,12 +33,12 @@ describe('Notes', () => {
     const api = installApi({
       notes: {
         list,
-        import: vi.fn(async () => ({ ok: true as const, data: { canceled: false as const, kind: 'text' as const, document: doc() } }))
+        importMany: importResult({ file: 'celula.md', ok: true, kind: 'text', document: doc() })
       }
     })
     render(<Notes subject={subject} />)
     await userEvent.click(await screen.findByRole('button', { name: /Importar texto/ }))
-    expect(api.notes.import).toHaveBeenCalledWith(7, 'text')
+    expect(api.notes.importMany).toHaveBeenCalledWith(7, 'text')
     expect(await screen.findByRole('status')).toHaveTextContent(/Apuntes de célula.*3 fragmentos/)
     expect(await screen.findByRole('list', { name: 'Documentos' })).toBeInTheDocument()
   })
@@ -51,10 +51,11 @@ describe('Notes', () => {
   })
 
   it('PDF sin texto: explica con honestidad que el OCR es solo para imágenes', async () => {
-    installApi({ notes: { import: vi.fn(async () => ({ ok: false as const, error: 'El PDF no tiene texto', code: 'NO_TEXT' as const })) } })
+    installApi({ notes: { importMany: importResult({ file: 'escaneo.pdf', ok: false, error: 'El PDF no tiene texto', code: 'NO_TEXT' }) } })
     render(<Notes subject={subject} />)
     await userEvent.click(await screen.findByRole('button', { name: /Importar PDF/ }))
     const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('escaneo.pdf')
     expect(alert).toHaveTextContent(/no contiene texto/i)
     expect(alert).toHaveTextContent(/solo.*imágenes/i)
     expect(alert).toHaveTextContent(/exporta/i)
@@ -143,7 +144,7 @@ describe('Notes', () => {
 
   it('tras importar una foto abre la revisión OCR con el texto editable', async () => {
     installApi({
-      notes: { import: vi.fn(async () => ({ ok: true as const, data: { canceled: false as const, kind: 'image' as const, documentId: 9, ocrText: 'La celula es la unidad' } })) }
+      notes: { importMany: importResult({ file: 'foto.png', ok: true, kind: 'image', documentId: 9, ocrText: 'La celula es la unidad' }) }
     })
     render(<Notes subject={subject} />)
     await userEvent.click(await screen.findByRole('button', { name: /Importar foto/ }))
@@ -155,7 +156,7 @@ describe('Notes', () => {
     let release: (v: unknown) => void = () => {}
     installApi({
       notes: {
-        import: vi.fn(
+        importMany: vi.fn(
           () =>
             new Promise((r) => {
               release = r
@@ -169,5 +170,63 @@ describe('Notes', () => {
     expect(screen.getByRole('status')).toHaveTextContent(/OCR|Leyendo/)
     release({ ok: true, data: { canceled: true } })
     await waitFor(() => expect(screen.getByRole('button', { name: /Importar PDF/ })).toBeEnabled())
+  })
+})
+
+describe('Notes: varios archivos de golpe', () => {
+  it('importa varios textos y resume cuántos y cuáles', async () => {
+    installApi({
+      notes: {
+        importMany: importResult(
+          { file: 'tema-1.md', ok: true, kind: 'text', document: doc({ id: 1, title: 'tema-1.md', chunkCount: 3 }) },
+          { file: 'tema-2.md', ok: true, kind: 'text', document: doc({ id: 2, title: 'tema-2.md', chunkCount: 1 }) }
+        )
+      }
+    })
+    render(<Notes subject={subject} />)
+    expect(screen.getByText(/varios archivos a la vez/)).toBeInTheDocument()
+    await userEvent.click(await screen.findByRole('button', { name: /Importar texto/ }))
+    const status = await screen.findByRole('status')
+    expect(status).toHaveTextContent(/2 archivos importados/)
+    expect(status).toHaveTextContent(/tema-1\.md.*3 fragmentos/)
+    expect(status).toHaveTextContent(/tema-2\.md.*1 fragmento/)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('si algunos fallan, los demás se importan y el aviso dice cuáles fallaron y por qué', async () => {
+    installApi({
+      notes: {
+        importMany: importResult(
+          { file: 'tema-1.pdf', ok: true, kind: 'pdf', document: doc({ id: 1, title: 'tema-1.pdf', sourceType: 'pdf', chunkCount: 2 }) },
+          { file: 'escaneo.pdf', ok: false, error: 'El PDF no tiene texto', code: 'NO_TEXT' },
+          { file: 'roto.pdf', ok: false, error: 'PDF dañado', code: 'INTERNAL' }
+        )
+      }
+    })
+    render(<Notes subject={subject} />)
+    await userEvent.click(await screen.findByRole('button', { name: /Importar PDF/ }))
+    expect(await screen.findByRole('status')).toHaveTextContent(/tema-1\.pdf.*2 fragmentos/)
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent(/2 archivos no se importaron/)
+    expect(alert).toHaveTextContent(/escaneo\.pdf.*no contiene texto/)
+    expect(alert).toHaveTextContent(/roto\.pdf: PDF dañado/)
+  })
+
+  it('varias fotos: abre la revisión de la primera y la siguiente al confirmar', async () => {
+    installApi({
+      notes: {
+        importMany: importResult(
+          { file: 'f1.png', ok: true, kind: 'image', documentId: 9, ocrText: 'Primera foto' },
+          { file: 'f2.png', ok: true, kind: 'image', documentId: 10, ocrText: 'Segunda foto' }
+        )
+      }
+    })
+    render(<Notes subject={subject} />)
+    await userEvent.click(await screen.findByRole('button', { name: /Importar foto/ }))
+    expect(await screen.findByLabelText(/Texto reconocido/)).toHaveValue('Primera foto')
+    expect(screen.getByText(/1 foto más esperando revisión/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar y trocear' }))
+    await waitFor(() => expect(screen.getByLabelText(/Texto reconocido/)).toHaveValue('Segunda foto'))
+    expect(screen.queryByText(/esperando revisión/)).not.toBeInTheDocument()
   })
 })

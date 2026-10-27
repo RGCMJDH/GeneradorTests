@@ -33,6 +33,8 @@ Todas las consultas que reciben un identificador filtran por asignatura. Escribi
 
 ## 3. De un apunte a fragmentos
 
+Los archivos se eligen en el diálogo nativo del proceso principal, que admite **varios a la vez** (hasta 50, `notes:importMany`). Se importan en serie y cada uno devuelve su resultado: uno que falla no detiene los demás ni deshace los ya importados. La interfaz solo recibe el nombre de cada archivo, nunca la ruta.
+
 ### Texto y Markdown
 Se leen como UTF-8, se quita el BOM y se normalizan los saltos de línea. El título es el nombre del archivo.
 
@@ -56,7 +58,8 @@ Este es el paso donde la promesa «no se inventa nada» se aplica. El flujo est�
 3. **Validación de la forma.** La respuesta se trata como texto no fiable: se comprueba que es un objeto, que cada campo tiene el tipo esperado, que el `chunkId` es exactamente el del fragmento enviado, y que las opciones de un test son cuatro y distintas, con la respuesta entre ellas.
 4. **Verificación de la cita.** Esta es la comprobación central: la cita se busca **en el texto guardado del fragmento**, nunca en el texto que devuelve el modelo. Ver la sección 5.
 5. **Números de los ejercicios prácticos.** En un práctico, los datos y el resultado no son una cita literal. Por eso cada número del enunciado (los datos) y de la respuesta (el resultado) tiene que aparecer en el fragmento tal cual, con el mismo signo y el mismo separador decimal. La explicación no se comprueba, porque suele traer pasos numerados y cálculos intermedios. En verdadero/falso y en test no se exige, porque una afirmación falsa o una opción incorrecta pueden cambiar una cifra a propósito.
-6. **Reintentos.** Si algo falla (forma inválida, cita no encontrada, número inventado, pregunta repetida), se vuelve a pedir, como máximo dos veces más.
+6. **Reintentos.** Si algo falla (forma inválida, cita no encontrada, número inventado, pregunta repetida), se vuelve a pedir, como máximo dos veces más. Si el modelo responde `{"sin_material":true}`, no se reintenta y ese fragmento no se vuelve a pedir en la misma generación; si ya no queda ninguno con material, la generación se para sin más llamadas.
+   Para que los prompts sean cortos, cada uno solo lista las preguntas ya generadas a partir del mismo fragmento.
 7. **Guardado.** Solo las preguntas que pasan todas las comprobaciones se guardan. El resumen indica cuántas se descartaron y por qué. Si un guardado falla, la generación se detiene y devuelve lo que ya estaba guardado.
 8. **Modelo no disponible.** Si no se llega al modelo en ningún intento (Ollama apagado o el modelo sin descargar), el resultado lo dice así, con `modelUnavailable`, y no como «sin material suficiente». Si el modelo sí contesta pero con una respuesta que no sirve, cuenta como descarte normal. Un fallo al guardar tampoco se presenta como falta de material.
 
@@ -104,13 +107,16 @@ Está en `src/core/llm.ts`. La app habla con Ollama en `http://localhost:11434` 
 
 Las llamadas no tienen tiempo máximo propio, porque un modelo local en CPU puede tardar minutos. Se pueden cancelar con la señal de cancelación que atraviesa generación, corrección y conceptos.
 
+Para que vaya más rápido en CPU, cada petición pide a Ollama mantener el modelo cargado 30 minutos (`keep_alive`; por defecto lo descarga a los 5 y recargarlo cuesta), fija el contexto en 4096 tokens y limita la respuesta a 1024 tokens (`num_predict`), de sobra para una pregunta en JSON.
+
 ## 9. Subida desde el móvil
 
 Está en `src/core/mobile.ts` y `src/main/ipc/mobile.ts`. Es lo único de la app que escucha en la red.
 
 - Se abre un servidor HTTP en la **IP de la wifi** (nunca en todas las interfaces) en un puerto aleatorio, con una ruta que lleva un token aleatorio de 128 bits. Cualquier otra ruta, un token incorrecto o una petición con un `Host` distinto del anunciado recibe un 404 vacío, igual en todos los casos.
 - La foto se lee en streaming con un tope de 15 MB: al superarlo se corta la conexión. Se verifica el tipo por los bytes y se rechazan las resoluciones mayores de 40 millones de píxeles.
-- Como máximo hay 20 subidas por sesión y la sesión dura 10 minutos.
+- Como máximo hay 20 subidas por sesión y la sesión dura 10 minutos. La página permite elegir varias fotos de la galería y las envía de una en una.
+- Si la cola de OCR está llena o hay demasiadas subidas a la vez, el servidor responde 429 con `Retry-After: 5` y la página espera y reenvía la misma foto. El tope de la sesión responde 429 sin `Retry-After`: es definitivo.
 - La foto se guarda en una carpeta temporal con un nombre generado, se reconoce en una cola que procesa **una cada vez** (hasta 5 pendientes), y el archivo se borra al terminar. Al cerrar la app, las fotos en cola se borran sin procesarse.
 - La conexión es **HTTP sin cifrar**. Por eso la sesión es corta y el enlace no debe compartirse.
 

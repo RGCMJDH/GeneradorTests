@@ -110,9 +110,19 @@ function reply(res: ServerResponse, status: number, body = '', extra: Record<str
   res.end(buf)
 }
 
+/** Rechazo pasajero (cola de OCR llena, demasiadas subidas a la vez): el móvil espera y reenvía la misma foto. */
+const RETRY_AFTER = { 'Retry-After': '5' }
+
 /** Responde y descarta (sin guardar) lo que siga llegando un rato, para que el cliente llegue a leer la respuesta. */
-function rejectAndDrain(r: IncomingMessage, res: ServerResponse, status: number, message: string, grace = 1500): void {
-  reply(res, status, message, { Connection: 'close' })
+function rejectAndDrain(
+  r: IncomingMessage,
+  res: ServerResponse,
+  status: number,
+  message: string,
+  grace = 1500,
+  extra: Record<string, string> = {}
+): void {
+  reply(res, status, message, { Connection: 'close', ...extra })
   r.on('data', () => undefined)
   const socket = r.socket
   const kill = setTimeout(() => socket.destroy(), grace)
@@ -193,8 +203,8 @@ export async function startUploadServer(opts: UploadServerOptions): Promise<Uplo
     const declared = r.headers['content-length']
     if (declared !== undefined && (!/^\d+$/.test(declared) || Number(declared) > maxBytes)) return rejectAndDrain(r, res, 413, 'La foto es demasiado grande.')
     const full = opts.checkCapacity?.()
-    if (full) return rejectAndDrain(r, res, 429, full)
-    if (inFlight >= MAX_IN_FLIGHT) return rejectAndDrain(r, res, 429, BUSY)
+    if (full) return rejectAndDrain(r, res, 429, full, undefined, RETRY_AFTER)
+    if (inFlight >= MAX_IN_FLIGHT) return rejectAndDrain(r, res, 429, BUSY, undefined, RETRY_AFTER)
     if (accepted + inFlight >= maxUploads) return rejectAndDrain(r, res, 429, 'Demasiadas fotos enviadas en esta sesión.')
 
     inFlight++ // reserva el cupo mientras se recibe, para que subidas concurrentes no superen maxUploads
@@ -214,7 +224,8 @@ export async function startUploadServer(opts: UploadServerOptions): Promise<Uplo
       try {
         await opts.onImage(body.data, sanitizeFilename(firstHeader(r.headers['x-filename'])))
       } catch (e) {
-        if (e instanceof UploadRejected) return reply(res, e.status, e.message)
+        // Un 429 de onImage es la cola de OCR llena: pasajero, como el de checkCapacity.
+        if (e instanceof UploadRejected) return reply(res, e.status, e.message, e.status === 429 ? RETRY_AFTER : {})
         return reply(res, 500, 'No se pudo procesar la foto en el ordenador. Inténtalo de nuevo.')
       }
       accepted++
