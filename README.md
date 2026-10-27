@@ -4,12 +4,27 @@ Aplicación de escritorio para Windows que genera tests a partir de **tus propio
 
 Importas tus apuntes por asignatura, la app los trocea, y genera preguntas de verdadero/falso, test, desarrollo y ejercicios prácticos. Cada pregunta lleva una cita que el código ha comprobado contra tus apuntes. Si no aparece, la pregunta se descarta.
 
-> **Descarga la rama `main`.** Es la versión 1.0, completa y probada. Ver [Qué rama descargar](#qué-rama-descargar).
+> **Para usar la app, descarga el instalador `.exe`** desde [Releases](https://github.com/RGCMJDH/GeneradorTests/releases/latest). Ver [Descargar la app](#descargar-la-app).
+> Para ver o modificar el código, usa la rama `main`.
 >
 > Cómo usarla paso a paso: [docs/GUIA_DE_USO.md](docs/GUIA_DE_USO.md).
 > Cómo funciona por dentro: [docs/COMO_FUNCIONA.md](docs/COMO_FUNCIONA.md).
 
+## Descargar la app
+
+1. Entra en [Releases](https://github.com/RGCMJDH/GeneradorTests/releases/latest) y descarga uno de estos archivos:
+   - **`Generador-de-tests-Setup-<versión>.exe`**: instalador. Crea accesos directos en el escritorio y en el menú Inicio. Es la opción recomendada.
+   - **`Generador-de-tests-<versión>-portable.exe`**: se abre sin instalar. Tarda algo más en arrancar.
+2. Ábrelo. Como la app no está firmada, Windows puede mostrar «Windows protegió su PC»: pulsa **Más información → Ejecutar de todas formas**.
+3. Instala [Ollama](https://ollama.com) y el modelo (ver [Requisitos](#requisitos)). Sin Ollama la app abre y puedes importar apuntes, pero no generar tests.
+
+No hace falta instalar Node ni descargar el código.
+
+Los `.exe` los compila GitHub en una máquina Windows (`.github/workflows/release.yml`) cada vez que se publica una versión. Antes de publicarlos se pasan todos los tests y una prueba de la app ya empaquetada.
+
 ## Qué rama descargar
+
+Solo hace falta si quieres el **código**. Para usar la app, mejor el `.exe` de [Descargar la app](#descargar-la-app).
 
 | Rama | Qué contiene | ¿Descargar? |
 |---|---|---|
@@ -62,12 +77,17 @@ Lo que **no** garantiza:
 
 ## Instalación y uso
 
+Si solo quieres usar la app, instala el `.exe` (ver [Descargar la app](#descargar-la-app)). Para trabajar con el código:
+
 ```
 npm install
 npm run dev     # aplicación en modo desarrollo
 npm test        # pruebas
 npm run pack    # empaquetado en release/win-unpacked/ (sin instalador)
+npm run dist    # instalador y portable .exe en release/ (en Windows)
 ```
+
+Para publicar una versión nueva, sube una etiqueta `vX.Y.Z` (por ejemplo `git tag v1.0.1 && git push origin v1.0.1`). GitHub compila los `.exe` y los publica en Releases.
 
 Pasos para usarla:
 

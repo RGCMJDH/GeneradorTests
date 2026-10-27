@@ -1,0 +1,70 @@
+# Compila la app para Windows (instalador + portable) en una máquina Windows de GitHub.
+# - Al subir una etiqueta vX.Y.Z: publica los .exe en una Release con ese nombre.
+# - En un PR hacia main, o lanzado a mano (Actions → Release Windows → Run workflow): solo compila y prueba,
+#   y deja los .exe como artefacto del run. No publica nada.
+name: Release Windows
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Tests
+        run: npx vitest run
+
+      - name: Compilar instalador y portable
+        run: npm run dist
+
+      # Arranca la app empaquetada en modo prueba (datos temporales, sin ventana): importa texto, PDF y
+      # una foto con OCR usando los datos de idioma incluidos. Si falla, no se publica nada.
+      - name: Prueba de humo de la app empaquetada
+        shell: pwsh
+        run: |
+          $env:GT_SMOKE = '1'
+          $env:GT_SMOKE_OUT = Join-Path $env:TEMP 'gt-smoke.txt'
+          $p = Start-Process -FilePath 'release\win-unpacked\Generador de tests.exe' -Wait -PassThru
+          if (Test-Path $env:GT_SMOKE_OUT) { Get-Content $env:GT_SMOKE_OUT }
+          if ($p.ExitCode -ne 0) { Write-Error "La prueba de humo falló (código $($p.ExitCode))"; exit 1 }
+
+      - name: Guardar los .exe como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: generador-tests-windows
+          path: release/*.exe
+          if-no-files-found: error
+
+      - name: Publicar la Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Generador de tests ${{ github.ref_name }}
+          files: release/*.exe
+          body: |
+            Descarga uno de los dos archivos:
+
+            - **Generador-de-tests-Setup-*.exe**: instalador. Crea accesos directos en el escritorio y en el menú Inicio. Recomendado.
+            - **Generador-de-tests-*-portable.exe**: se abre sin instalar (tarda más en arrancar).
+
+            Necesitas [Ollama](https://ollama.com) con el modelo `qwen2.5:7b` (`ollama pull qwen2.5:7b`) para generar tests. Sin él, la app abre y puedes importar apuntes.
+
+            Windows puede avisar de que la app no está firmada («Windows protegió su PC»): pulsa «Más información» → «Ejecutar de todas formas».

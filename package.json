@@ -8,7 +8,8 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "test": "vitest run",
-    "pack": "node scripts/prepare-tessdata.mjs && electron-vite build && electron-builder --win dir"
+    "pack": "node scripts/prepare-tessdata.mjs && electron-vite build && electron-builder --win dir",
+    "dist": "node scripts/prepare-tessdata.mjs && electron-vite build && electron-builder --win nsis portable --publish never"
   },
   "dependencies": {
     "pdf-parse": "^2.4.5",
@@ -96,7 +97,7 @@
           ]
         },
         {
-          "target": "dir",
+          "target": "portable",
           "arch": [
             "x64"
           ]
@@ -106,9 +107,16 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "perMachine": false
+      "perMachine": false,
+      "artifactName": "Generador-de-tests-Setup-${version}.exe",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Generador de tests"
     },
     "publish": null,
-    "afterPack": "scripts/after-pack.cjs"
+    "afterPack": "scripts/after-pack.cjs",
+    "portable": {
+      "artifactName": "Generador-de-tests-${version}-portable.exe"
+    }
   }
 }
