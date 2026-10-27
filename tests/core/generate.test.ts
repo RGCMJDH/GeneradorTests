@@ -135,7 +135,7 @@ describe('generateQuestions', () => {
     const llm = new FakeLlm([{}])
     const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'test', count: 3 })
     expect(llm.calls).toBe(0)
-    expect(r).toEqual({ questions: [], discarded: 0, reasons: ['sin material suficiente'], insufficient: true })
+    expect(r).toEqual({ questions: [], discarded: 0, reasons: ['sin material suficiente'], insufficient: true, modelUnavailable: false })
   })
 
   it('no usa chunks de otra asignatura', async () => {
@@ -332,7 +332,7 @@ describe('generateQuestions', () => {
         const llm = new FakeLlm([{}])
         const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'desarrollo', count })
         expect(llm.calls, String(count)).toBe(0)
-        expect(r).toEqual({ questions: [], discarded: 0, reasons: ['cantidad de preguntas no válida'], insufficient: false })
+        expect(r).toEqual({ questions: [], discarded: 0, reasons: ['cantidad de preguntas no válida'], insufficient: false, modelUnavailable: false })
       }
     })
 
@@ -406,7 +406,7 @@ describe('generateQuestions', () => {
       const llm = new FakeLlm([{}])
       const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'vf', count: 1, topic: '¿?' })
       expect(llm.calls).toBe(0)
-      expect(r).toEqual({ questions: [], discarded: 0, reasons: ['sin material suficiente'], insufficient: true })
+      expect(r).toEqual({ questions: [], discarded: 0, reasons: ['sin material suficiente'], insufficient: true, modelUnavailable: false })
     })
 
     it('topic en blanco equivale a sin filtro', async () => {
@@ -540,7 +540,7 @@ describe('generateQuestions: practico', () => {
     const llm = new FakeLlm([{}])
     const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'practico', count: 3 })
     expect(llm.calls).toBe(0)
-    expect(r).toEqual({ questions: [], discarded: 0, reasons: [NO_EXERCISES], insufficient: true })
+    expect(r).toEqual({ questions: [], discarded: 0, reasons: [NO_EXERCISES], insufficient: true, modelUnavailable: false })
     expect(store.listQuestions(s.id)).toHaveLength(0)
   })
 
@@ -608,7 +608,7 @@ describe('generateQuestions: practico', () => {
     const llm = new FakeLlm([{}])
     const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'practico', count: 2, topic: 'mitocondria' })
     expect(llm.calls).toBe(0)
-    expect(r).toEqual({ questions: [], discarded: 0, reasons: [NO_EXERCISES], insufficient: true })
+    expect(r).toEqual({ questions: [], discarded: 0, reasons: [NO_EXERCISES], insufficient: true, modelUnavailable: false })
   })
 
   it('el documentId se aplica antes del filtro', async () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { verifyQuote } from '@core/verify'
+import { numbersGrounded, verifyQuote } from '@core/verify'
 
 const chunk =
   'La mitocondria es el orgánulo encargado de producir energía en forma de ATP. ' +
@@ -28,5 +28,77 @@ describe('verifyQuote', () => {
     expect(verifyQuote('ATP', chunk)).toBe(false)
     expect(verifyQuote('El  núcleo', 'El núcleo celular')).toBe(true) // 9 chars: ok
     expect(verifyQuote('núcleo', chunk)).toBe(false) // 6 chars
+  })
+})
+
+describe('verifyQuote: signos, cifras y límites de palabra', () => {
+  it('rechaza un signo menos eliminado', () => {
+    expect(verifyQuote('la solución es x = 5', 'la solución es x = -5')).toBe(false)
+  })
+
+  it('rechaza un cambio de separador decimal', () => {
+    expect(verifyQuote('mide 2.5 metros', 'mide 2,5 metros')).toBe(false)
+  })
+
+  it('rechaza una cita que empieza a mitad de palabra', () => {
+    expect(verifyQuote('ula es la unidad', 'la célula es la unidad')).toBe(false)
+  })
+
+  it('rechaza una cita que termina a mitad de palabra', () => {
+    expect(verifyQuote('la célula es la uni', 'la célula es la unidad')).toBe(false)
+  })
+
+  it('rechaza un operador de comparación invertido', () => {
+    expect(verifyQuote('a < b es mayor', 'a > b es mayor')).toBe(false)
+  })
+
+  it('rechaza = frente a ≠', () => {
+    expect(verifyQuote('el valor a = b siempre', 'el valor a ≠ b siempre')).toBe(false)
+  })
+
+  it('rechaza una cita que empieza tras el signo de un número', () => {
+    expect(verifyQuote('5 al final del todo', 'x = -5 al final del todo')).toBe(false)
+  })
+
+  it('rechaza una cita que empieza a mitad de un decimal', () => {
+    expect(verifyQuote('5 metros de largo', 'mide 2.5 metros de largo')).toBe(false)
+  })
+
+  it('acepta el mismo signo con otro guion Unicode y otro espaciado', () => {
+    expect(verifyQuote('x=-5 al final', 'el resultado es x = −5 al final')).toBe(true)
+  })
+
+  it('acepta ligaduras de PDF frente a letras normales', () => {
+    expect(verifyQuote('fibra muscular', 'la ﬁbra muscular se contrae')).toBe(true)
+  })
+
+  it('acepta una cita sin el punto final del fragmento', () => {
+    expect(verifyQuote('la célula es la unidad', 'la célula es la unidad.')).toBe(true)
+  })
+
+  it('acepta cifras y operadores copiados literalmente', () => {
+    expect(verifyQuote('V = I · R, es decir V = 2 · 10 = 20 voltios', 'cumple V = I · R, es decir V = 2 · 10 = 20 voltios.')).toBe(true)
+    expect(verifyQuote('mide 2,5 metros', 'el tablero mide 2,5 metros.')).toBe(true)
+  })
+})
+
+describe('numbersGrounded', () => {
+  const chunkText = 'Una resistencia de 10 ohmios con 2,5 amperios da V = 25 voltios.'
+
+  it('acepta texto sin números o con números del fragmento', () => {
+    expect(numbersGrounded('Se aplica la ley de Ohm.', chunkText)).toBe(true)
+    expect(numbersGrounded('V = 10 · 2,5 = 25 voltios', chunkText)).toBe(true)
+  })
+
+  it('rechaza un número ausente del fragmento', () => {
+    expect(numbersGrounded('V = 30 voltios', chunkText)).toBe(false)
+  })
+
+  it('compara la cadena exacta: 2.5 no es 2,5', () => {
+    expect(numbersGrounded('2.5 amperios', chunkText)).toBe(false)
+  })
+
+  it('normaliza dígitos de ancho completo (NFKC)', () => {
+    expect(numbersGrounded('１０ ohmios', chunkText)).toBe(true)
   })
 })
