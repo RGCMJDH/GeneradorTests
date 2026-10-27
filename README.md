@@ -4,8 +4,29 @@ Aplicación de escritorio para Windows que genera tests a partir de **tus propio
 
 Importas tus apuntes por asignatura, la app los trocea, y genera preguntas de verdadero/falso, test, desarrollo y ejercicios prácticos. Cada pregunta lleva una cita que el código ha comprobado contra tus apuntes. Si no aparece, la pregunta se descarta.
 
+> **Descarga la rama `main`.** Es la versión 1.0, completa y probada. Ver [Qué rama descargar](#qué-rama-descargar).
+>
 > Cómo usarla paso a paso: [docs/GUIA_DE_USO.md](docs/GUIA_DE_USO.md).
 > Cómo funciona por dentro: [docs/COMO_FUNCIONA.md](docs/COMO_FUNCIONA.md).
+
+## Qué rama descargar
+
+| Rama | Qué contiene | ¿Descargar? |
+|---|---|---|
+| **`main`** | La versión **1.0**: la app completa con todos los arreglos. | **Sí, esta.** |
+| `feat/generador-tests` | La rama donde se desarrolló la app. Le faltan los últimos arreglos de la verificación de citas y no está en 1.0. Todo lo que tiene ya está en `main`. | No. Se borrará. |
+| `claude/optimistic-sagan-mt1ezm` | Rama de trabajo de los arreglos finales, ya fusionada en `main`. | No. Se borrará. |
+
+Para descargarla:
+
+- **Sin Git:** en GitHub, elige la rama `main` en el selector de ramas y pulsa **Code → Download ZIP**.
+- **Con Git:**
+
+  ```
+  git clone -b main https://github.com/RGCMJDH/GeneradorTests.git
+  ```
+
+Después sigue los pasos de [Requisitos](#requisitos) e [Instalación y uso](#instalación-y-uso).
 
 ## Características
 
