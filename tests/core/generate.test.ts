@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { openStore } from '@core/store'
-import type { LlmProvider } from '@core/llm'
+import { ModelUnavailableError, type LlmProvider } from '@core/llm'
 import { generateQuestions } from '@core/generate'
 
 type Call = { system: string; user: string; n: number }
@@ -298,6 +298,22 @@ describe('generateQuestions', () => {
   })
 
   describe('endurecimiento', () => {
+    it('saveQuestion que lanza en la 1ª pregunta: no es "sin material" ni "modelo no disponible"', async () => {
+      const { store, s, c1 } = await setup()
+      const broken = {
+        ...store,
+        saveQuestion() {
+          throw new Error('SQLITE_FULL: disco lleno')
+        }
+      }
+      const llm = new FakeLlm([good(c1.id)])
+      const r = await generateQuestions({ llm, store: broken }, { subjectId: s.id, type: 'desarrollo', count: 2 })
+      expect(r.questions).toHaveLength(0)
+      expect(r.insufficient).toBe(false)
+      expect(r.modelUnavailable).toBe(false)
+      expect(r.reasons[0]).toMatch(/no se pudo guardar la pregunta: SQLITE_FULL/)
+    })
+
     it('saveQuestion que lanza en la 2ª pregunta: devuelve la 1ª, cuenta el resto como descartadas, no lanza', async () => {
       const { store, s, c1, c2 } = await setup()
       let saves = 0
@@ -688,7 +704,6 @@ describe('generateQuestions: números del práctico', () => {
   it.each([
     ['resultado inventado en la respuesta', { respuesta: 'V = I · R = 2 · 10 = 30 voltios' }],
     ['dato inventado en el enunciado', { enunciado: 'Una resistencia de 15 ohmios recorrida por 2 amperios: ¿qué tensión hay?' }],
-    ['número inventado en la explicación', { explicacion: 'Con 3 amperios saldrían 30 voltios.' }],
     ['separador decimal cambiado', { respuesta: 'V = 2.0 · 10 = 20 voltios' }]
   ])('descarta un práctico con %s aunque la cita sea válida', async (_n, extra) => {
     const { store, s, c } = await make(EX)
@@ -698,6 +713,13 @@ describe('generateQuestions: números del práctico', () => {
     expect(r.discarded).toBe(1)
     expect(r.reasons[0]).toMatch(/número/)
     expect(store.listQuestions(s.id)).toHaveLength(0)
+  })
+
+  it('la explicación no se comprueba: pasos numerados y resultados intermedios no descartan el ejercicio', async () => {
+    const { store, s, c } = await make(EX)
+    const llm = new FakeLlm([exercise(c.id, { explicacion: 'Paso 1: se toma I = 2. Paso 2: se multiplica por R; 2 · 10 da 20.' })])
+    const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'practico', count: 1 })
+    expect(r.questions).toHaveLength(1)
   })
 
   it('vf no exige números del fragmento: una afirmación falsa puede cambiar una cifra', async () => {
@@ -713,7 +735,7 @@ describe('generateQuestions: números del práctico', () => {
 describe('generateQuestions: modelo no disponible', () => {
   it('si todas las llamadas fallan por el modelo → modelUnavailable, no "sin material"', async () => {
     const { store, s } = await setup()
-    const llm = new FakeLlm([new Error('No se pudo conectar con Ollama en http://localhost:11434')])
+    const llm = new FakeLlm([new ModelUnavailableError('No se pudo conectar con Ollama en http://localhost:11434')])
     const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'vf', count: 2 })
     expect(r.questions).toHaveLength(0)
     expect(r.modelUnavailable).toBe(true)
@@ -721,9 +743,18 @@ describe('generateQuestions: modelo no disponible', () => {
     expect(r.reasons.every((x) => x.startsWith('error del modelo'))).toBe(true)
   })
 
+  it('un modelo que contesta pero sin JSON válido no es modelUnavailable: es material/modelo insuficiente', async () => {
+    const { store, s } = await setup()
+    const llm = new FakeLlm([new Error('La respuesta del modelo no contiene JSON válido.')])
+    const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'vf', count: 1 })
+    expect(r.questions).toHaveLength(0)
+    expect(r.modelUnavailable).toBe(false)
+    expect(r.insufficient).toBe(true)
+  })
+
   it('si el modelo responde aunque sea una vez, no es modelUnavailable', async () => {
     const { store, s } = await setup()
-    const llm = new FakeLlm([new Error('timeout'), { sin_material: true }])
+    const llm = new FakeLlm([new ModelUnavailableError('timeout'), { sin_material: true }])
     const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'vf', count: 1 })
     expect(r.questions).toHaveLength(0)
     expect(r.modelUnavailable).toBe(false)
@@ -732,7 +763,7 @@ describe('generateQuestions: modelo no disponible', () => {
 
   it('con preguntas generadas, modelUnavailable es false aunque otras fallen por el modelo', async () => {
     const { store, s, c1 } = await setup()
-    const llm = new FakeLlm([good(c1.id), new Error('se cayó')])
+    const llm = new FakeLlm([good(c1.id), new ModelUnavailableError('se cayó')])
     const r = await generateQuestions({ llm, store }, { subjectId: s.id, type: 'desarrollo', count: 2 })
     expect(r.questions).toHaveLength(1)
     expect(r.modelUnavailable).toBe(false)

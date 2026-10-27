@@ -55,10 +55,10 @@ Este es el paso donde la promesa «no se inventa nada» se aplica. El flujo est�
 2. **Petición al modelo.** Cada pregunta se pide con **un único fragmento** en el mensaje. El texto de los apuntes va entre delimitadores aleatorios, por si contiene instrucciones, y el mensaje de sistema dice al modelo que trate ese texto como datos y no como órdenes. El modelo debe responder en JSON, con el enunciado, la respuesta, la explicación, el `chunkId` del fragmento y una `cita` literal.
 3. **Validación de la forma.** La respuesta se trata como texto no fiable: se comprueba que es un objeto, que cada campo tiene el tipo esperado, que el `chunkId` es exactamente el del fragmento enviado, y que las opciones de un test son cuatro y distintas, con la respuesta entre ellas.
 4. **Verificación de la cita.** Esta es la comprobación central: la cita se busca **en el texto guardado del fragmento**, nunca en el texto que devuelve el modelo. Ver la sección 5.
-5. **Números de los ejercicios prácticos.** En un práctico, los datos y el resultado no son una cita literal. Por eso cada número del enunciado, la respuesta y la explicación tiene que aparecer en el fragmento tal cual, con el mismo signo y el mismo separador decimal. En verdadero/falso y en test no se exige, porque una afirmación falsa o una opción incorrecta pueden cambiar una cifra a propósito.
+5. **Números de los ejercicios prácticos.** En un práctico, los datos y el resultado no son una cita literal. Por eso cada número del enunciado (los datos) y de la respuesta (el resultado) tiene que aparecer en el fragmento tal cual, con el mismo signo y el mismo separador decimal. La explicación no se comprueba, porque suele traer pasos numerados y cálculos intermedios. En verdadero/falso y en test no se exige, porque una afirmación falsa o una opción incorrecta pueden cambiar una cifra a propósito.
 6. **Reintentos.** Si algo falla (forma inválida, cita no encontrada, número inventado, pregunta repetida), se vuelve a pedir, como máximo dos veces más.
 7. **Guardado.** Solo las preguntas que pasan todas las comprobaciones se guardan. El resumen indica cuántas se descartaron y por qué. Si un guardado falla, la generación se detiene y devuelve lo que ya estaba guardado.
-8. **Modelo no disponible.** Si el modelo no responde en ningún intento (Ollama apagado o sin el modelo), el resultado lo dice así, con `modelUnavailable`, y no como «sin material suficiente».
+8. **Modelo no disponible.** Si no se llega al modelo en ningún intento (Ollama apagado o el modelo sin descargar), el resultado lo dice así, con `modelUnavailable`, y no como «sin material suficiente». Si el modelo sí contesta pero con una respuesta que no sirve, cuenta como descarte normal. Un fallo al guardar tampoco se presenta como falta de material.
 
 Cancelar una generación es seguro: las preguntas ya validadas se conservan y el resto no se guarda.
 
@@ -68,6 +68,7 @@ Está en `src/core/verify.ts`.
 
 - Cita y fragmento se dividen en **piezas**: palabras, números (con su signo y su separador decimal, como `-5` o `2,5`) y operadores (`=`, `<`, `>`, `≠`, `+`, `·`…).
 - Se toleran las diferencias que no cambian el sentido: mayúsculas, tildes, ligaduras de PDF (`ﬁ` → `fi`), espacios, la puntuación de la prosa y las distintas variantes Unicode del signo menos.
+- Los superíndices son exponentes: `3²` equivale a `3^2` (no a `32`) y `10⁻³` a `10^-3`. Las fracciones como `½` equivalen a `1/2`.
 - La cita debe tener al menos **8 caracteres**. Esto evita que una palabra suelta pase como respaldo.
 - La cita es válida si sus piezas aparecen **seguidas y completas** en el fragmento. No puede empezar ni acabar a mitad de una palabra o de un número.
 
@@ -84,7 +85,7 @@ Está en `src/core/grade.ts`.
 
 - **Verdadero/falso y test**: la corrección es determinista, sin modelo. El feedback es la explicación guardada con la pregunta.
 - **Desarrollo y ejercicios**: el modelo compara tu respuesta con la referencia y da un veredicto y una cita. Si la cita no se puede verificar, se usa la cita original de la pregunta, que sí fue verificada al crearla, y el texto del feedback lo indica con la marca «(cita del modelo no verificada)».
-- En los **ejercicios**, si el feedback trae números que no están ni en el fragmento ni en tu respuesta, se marca con «(cifras del modelo no verificadas…)».
+- En los **ejercicios**, si el feedback trae números que no están ni en el fragmento, ni en la pregunta guardada, ni en tu respuesta, se marca con «(cifras del modelo no verificadas…)». La cita del modelo se verifica igualmente.
 - La interfaz solo muestra la insignia «Cita verificada en tus apuntes» en el bloque de la cita y solo cuando la verificación fue correcta. El texto del feedback nunca lleva esa insignia.
 
 ## 7. Índice de conceptos

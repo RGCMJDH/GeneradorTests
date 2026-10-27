@@ -23,7 +23,7 @@ Cada pregunta que ves lleva una **cita literal** de tus apuntes, y el código co
 Lo que **no** garantiza:
 
 - La comprobación prueba que el **pasaje existe** en tus apuntes, no que la pregunta esté bien planteada ni que el modelo lo haya entendido. Revisa las preguntas con criterio.
-- En los **ejercicios prácticos** se comprueba además que cada número del enunciado, la respuesta y la explicación esté en tus apuntes. Esto no se aplica a verdadero/falso ni a test, donde una opción incorrecta puede cambiar una cifra a propósito.
+- En los **ejercicios prácticos** se comprueba además que cada número del enunciado y de la respuesta esté en tus apuntes. Esto no se aplica a verdadero/falso ni a test, donde una opción incorrecta puede cambiar una cifra a propósito.
 - La calidad depende del modelo. Con modelos pequeños se descartan más preguntas.
 
 ## Requisitos

@@ -3,6 +3,14 @@ export interface LlmProvider {
   health(): Promise<{ ok: boolean; message: string }>
 }
 
+/**
+ * No se llegó al modelo: Ollama no responde o el modelo no está instalado.
+ * Distinto de un modelo que sí contesta pero mal (sin JSON, error 500…), que lanza un Error normal.
+ */
+export class ModelUnavailableError extends Error {
+  override name = 'ModelUnavailableError'
+}
+
 const DEFAULT_BASE_URL = 'http://localhost:11434'
 const DEFAULT_MODEL = 'qwen2.5:7b'
 const DEFAULT_HEALTH_TIMEOUT_MS = 3000
@@ -116,7 +124,7 @@ export class OllamaProvider implements LlmProvider {
       })
     } catch (e) {
       if (isAbort(e)) throw cancelled()
-      throw new Error(
+      throw new ModelUnavailableError(
         `No se pudo conectar con Ollama en ${this.baseUrl}. Comprueba que esté en ejecución (ollama serve). Detalle: ${errMsg(e)}`
       )
     }
@@ -126,7 +134,8 @@ export class OllamaProvider implements LlmProvider {
         res.status === 404
           ? ` Comprueba que el modelo ${this.model} esté instalado (ollama pull ${this.model}).`
           : ''
-      throw new Error(`Ollama respondió con error ${res.status}${detail ? `: ${detail}` : ''}.${hint}`)
+      const message = `Ollama respondió con error ${res.status}${detail ? `: ${detail}` : ''}.${hint}`
+      throw res.status === 404 ? new ModelUnavailableError(message) : new Error(message)
     }
     let data: unknown
     try {

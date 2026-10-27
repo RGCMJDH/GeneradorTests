@@ -1,8 +1,12 @@
 export const MIN_QUOTE_LENGTH = 8
 
 // Variantes Unicode del guion/menos que se tratan como "-" (guion, guion duro, figura, en dash, signo menos).
-const DASHES = /[‐-–−﹣]/g
+const DASHES = /[\u2010-\u2013\u2212\uFE63]/g
 const OPERATORS = '=<>≠≤≥+\\-×·*/^%±≈√'
+// Superíndices: son exponentes, no dígitos sueltos. NFKC los pegaría a la base ("3²" → "32").
+const SUPERSCRIPTS: Record<string, string> = {
+  '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9', '⁺': '+', '⁻': '-'
+}
 const IS_OPERATOR = new RegExp(`^[${OPERATORS}]$`, 'u')
 // Números con separadores internos (2,5 · 1.000.000), palabras (letras y cifras pegadas) y operadores sueltos.
 // El resto (espacios y puntuación de prosa) solo separa tokens.
@@ -15,10 +19,13 @@ const TOKEN = new RegExp(`\\d+(?:[.,]\\d+)*|\\p{L}[\\p{L}\\p{N}]*|[${OPERATORS}]
  * "≠" se descompone en "=" + marca combinante y no debe acabar como "=".
  * Un "-" pegado a un número es su signo, salvo que el "-" vaya pegado a una palabra
  * o número anterior ("10-5" es una resta).
+ * Los superíndices pasan a "^" ("3²" = "3^2", "10⁻³" = "10^-3") y la barra de fracción a "/" ("½" = "1/2").
  */
 export function quoteTokens(s: string): string[] {
   const text = s
+    .replace(/[⁰¹²³⁴-⁹⁺⁻]+/g, (run) => `^${[...run].map((c) => SUPERSCRIPTS[c]).join('')}`)
     .normalize('NFKC')
+    .replace(/\u2044/g, '/')
     .replace(/\p{L}\p{M}*/gu, (ch) => ch.normalize('NFD').replace(/\p{M}+/gu, ''))
     .toLowerCase()
     .replace(DASHES, '-')

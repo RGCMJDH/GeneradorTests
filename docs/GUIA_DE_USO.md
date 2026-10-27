@@ -97,7 +97,7 @@ Cada pregunta aparece sola, con su número («Pregunta 3 de 5»).
 
 Al responder aparece la corrección: correcto o incorrecto, la explicación y el **fragmento de origen**. La insignia **Cita verificada en tus apuntes** aparece solo cuando la cita se ha comprobado en tus apuntes. El botón **Ver en apuntes** te lleva al fragmento original.
 
-Si una corrección de desarrollo dice «(cita del modelo no verificada)», la explicación del modelo no tiene respaldo en tus apuntes. Revísala con cuidado. En los ejercicios, la marca «(cifras del modelo no verificadas…)» avisa de que el feedback usa números que no están en tus apuntes ni en tu respuesta.
+Si una corrección de desarrollo dice «(cita del modelo no verificada)», la explicación del modelo no tiene respaldo en tus apuntes. Revísala con cuidado. En los ejercicios, la marca «(cifras del modelo no verificadas…)» avisa de que el feedback usa números que no están en tus apuntes, en la pregunta ni en tu respuesta.
 
 ### Terminar
 

@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import type { Chunk, Question, QuestionType } from './types'
-import type { LlmProvider } from './llm'
+import { ModelUnavailableError, type LlmProvider } from './llm'
 import type { Store } from './store'
 import { normalize } from './normalize'
 import { numbersGrounded, verifyQuote } from './verify'
@@ -168,7 +168,7 @@ export async function generateQuestions(
   let discarded = 0
   let aborted = false
   let saveFailed = false
-  let modelAnswered = false
+  let modelReached = false
 
   const progress = (done: number): void => {
     try {
@@ -198,10 +198,12 @@ export async function generateQuestions(
           aborted = true
           break
         }
+        // Solo "no disponible" si no se llegó al modelo; un modelo que contesta mal sí respondió.
+        if (!(e instanceof ModelUnavailableError)) modelReached = true
         reason = `error del modelo: ${errText(e)}`
         continue
       }
-      modelAnswered = true
+      modelReached = true
       if (signal?.aborted) {
         aborted = true
         break
@@ -217,10 +219,11 @@ export async function generateQuestions(
         reason = 'la cita no aparece literalmente en el fragmento'
         continue
       }
-      // En un práctico los datos y el resultado no son cita literal: cada número debe estar en el fragmento.
+      // En un práctico los datos (enunciado) y el resultado (respuesta) no son cita literal: cada número debe
+      // estar en el fragmento. La explicación no se mira: trae pasos numerados y cálculos intermedios.
       // En vf/test no se exige: una afirmación falsa o una opción incorrecta pueden cambiar una cifra a propósito.
-      const { prompt, answer, explanation } = parsed.value
-      if (req.type === 'practico' && !numbersGrounded(`${prompt}\n${answer}\n${explanation}`, stored.text)) {
+      const { prompt, answer } = parsed.value
+      if (req.type === 'practico' && !numbersGrounded(`${prompt}\n${answer}`, stored.text)) {
         reason = 'el ejercicio usa números que no están en el fragmento'
         continue
       }
@@ -253,7 +256,7 @@ export async function generateQuestions(
 
   // Una ejecución cancelada devuelve lo generado hasta entonces y NO es "insufficient":
   // el motivo de que falten preguntas es la cancelación del usuario, no la falta de material.
-  // Si el modelo no respondió nunca, tampoco: el problema es el modelo, no los apuntes.
-  const empty = !aborted && questions.length === 0
-  return { questions, discarded, reasons, insufficient: empty && modelAnswered, modelUnavailable: empty && !modelAnswered }
+  // Si el modelo no respondió nunca, o no se pudo guardar, tampoco: el problema no son los apuntes.
+  const empty = !aborted && !saveFailed && questions.length === 0
+  return { questions, discarded, reasons, insufficient: empty && modelReached, modelUnavailable: empty && !modelReached }
 }

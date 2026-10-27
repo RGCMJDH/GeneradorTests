@@ -238,6 +238,24 @@ describe('gradeAnswer: números del feedback en un práctico', () => {
     expect(r.quote).toBe(EX_QUOTE)
   })
 
+  it('feedback que repite números de la respuesta de referencia guardada se acepta', async () => {
+    const { store, q } = await practico()
+    const ref = { ...q, prompt: 'Con los datos del ejemplo, ¿cuánto vale V en el apartado 3?', answer: 'V = 20 voltios (apartado 3)' }
+    const llm = new FakeLlm([{ correcta: false, feedback: 'En el apartado 3 la respuesta es 20 voltios.', cita: EX_QUOTE }])
+    const r = await gradeAnswer({ llm, store }, ref, '25 voltios')
+    expect(r.feedback).toBe('En el apartado 3 la respuesta es 20 voltios.')
+  })
+
+  it('con cifras dudosas, una cita del modelo válida se sigue verificando y mostrando', async () => {
+    const { store, q } = await practico()
+    const otherQuote = 'una resistencia de 10 ohmios recorrida por 2 amperios'
+    const llm = new FakeLlm([{ correcta: false, feedback: 'Saldrían 30 voltios.', cita: otherQuote }])
+    const r = await gradeAnswer({ llm, store }, q, '25 voltios')
+    expect(r.feedback).toMatch(/no verificad/)
+    expect(r.quote).toBe(otherQuote)
+    expect(r.verified).toBe(true)
+  })
+
   it('feedback que repite números del alumno y del fragmento se acepta', async () => {
     const { store, q } = await practico()
     const llm = new FakeLlm([{ correcta: false, feedback: 'Has puesto 25 voltios, pero 2 · 10 = 20 voltios.', cita: EX_QUOTE }])
